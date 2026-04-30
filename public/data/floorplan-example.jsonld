@@ -1,0 +1,652 @@
+{
+  "@context": {
+    "@vocab": "https://brickschema.org/schema/Brick#",
+    "rec": "https://www.w3.org/2022/rec#",
+    "ex": "http://example.org/props#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#"
+  },
+  "@graph": [
+    {
+      "@id": "http://example.org/house/house-01",
+      "@type": "Building",
+      "skos:prefLabel": "Example House 01",
+      "hasPart": [
+        { "@id": "http://example.org/house/house-01-floor-1" }
+      ]
+    },
+    {
+      "@id": "http://example.org/house/house-01-floor-1",
+      "@type": "Floor",
+      "skos:prefLabel": "Level 1",
+      "hasPart": [
+        { "@id": "http://example.org/house/space-outdoor" },
+        { "@id": "http://example.org/house/space-bathroom-1" },
+        { "@id": "http://example.org/house/space-hallway-mudroom" },
+        { "@id": "http://example.org/house/space-room-1" },
+        { "@id": "http://example.org/house/space-room-2" },
+        { "@id": "http://example.org/house/space-bathroom-2" },
+        { "@id": "http://example.org/house/space-bathroom-3" },
+        { "@id": "http://example.org/house/space-room-3" },
+        { "@id": "http://example.org/house/space-hallway" },
+        { "@id": "http://example.org/house/space-foyer" },
+        { "@id": "http://example.org/house/space-common-room" },
+        { "@id": "http://example.org/house/space-room-4" },
+        { "@id": "http://example.org/house/space-office" },
+        { "@id": "http://example.org/house/space-bathroom-4" },
+        { "@id": "http://example.org/house/space-bathroom-5" },
+        { "@id": "http://example.org/house/space-bathroom-6" },
+        { "@id": "http://example.org/house/space-kitchen" },
+        { "@id": "http://example.org/house/space-plenum-main" }
+      ]
+    },
+    {
+      "@id": "http://example.org/house/LocalPlanCS",
+      "@type": "rec:CoordinateSystem",
+      "rdfs:label": "Local Plan Coordinates",
+      "rec:axisOrder": "XY",
+      "rec:unit": "meters",
+      "rec:origin": "[0,0,0]",
+      "rec:yAxisDirection": "down"
+    },
+
+    {
+      "@id": "http://example.org/house/space-outdoor",
+      "@type": "Space",
+      "skos:prefLabel": "Outdoor Space",
+      "rec:geometry": { "@id": "http://example.org/house/geom-outdoor" }
+    },
+    {
+      "@id": "http://example.org/house/geom-outdoor",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[0,10,0],[0,24,0],[12,24,0],[12,0,0],[7,3,0],[0,10,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-bathroom-1",
+      "@type": "Bathroom",
+      "skos:prefLabel": "Bathroom 1",
+      "rec:geometry": { "@id": "http://example.org/house/geom-bathroom-1" }
+    },
+    {
+      "@id": "http://example.org/house/geom-bathroom-1",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[12,0,0],[15,0,0],[15,2.5,0],[12,2.5,0],[12,0,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-hallway-mudroom",
+      "@type": "Corridor",
+      "skos:prefLabel": "Hallway / Mudroom",
+      "rec:geometry": { 
+          "rec:coordinateSystem": "LocalPlanCS",
+          "rec:coordinates": "[[12,2.5,0],[15,2.5,0],[15,5,0],[12,5,0],[12,2.5,0]]"
+      },
+    },
+    {
+      "@id": "http://example.org/house/geom-hallway-mudroom",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[12,2.5,0],[15,2.5,0],[15,5,0],[12,5,0],[12,2.5,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-room-1",
+      "@type": "Room",
+      "skos:prefLabel": "Room 1",
+      "rec:geometry": { "@id": "http://example.org/house/geom-room-1" }
+    },
+    {
+      "@id": "http://example.org/house/geom-room-1",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[15,0,0],[35,0,0],[35,5,0],[15,5,0],[15,0,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-room-2",
+      "@type": "Room",
+      "skos:prefLabel": "Room 2",
+      "rec:geometry": { "@id": "http://example.org/house/geom-room-2" }
+    },
+    {
+      "@id": "http://example.org/house/geom-room-2",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[12,5,0],[22,5,0],[22,11,0],[12,11,0],[12,5,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-bathroom-2",
+      "@type": "Bathroom",
+      "skos:prefLabel": "Bathroom 2",
+      "rec:geometry": { "@id": "http://example.org/house/geom-bathroom-2" }
+    },
+    {
+      "@id": "http://example.org/house/geom-bathroom-2",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[22,5,0],[25,5,0],[25,8,0],[22,8,0],[22,5,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-bathroom-3",
+      "@type": "Bathroom",
+      "skos:prefLabel": "Bathroom 3",
+      "rec:geometry": { "@id": "http://example.org/house/geom-bathroom-3" }
+    },
+    {
+      "@id": "http://example.org/house/geom-bathroom-3",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[22,8,0],[25,8,0],[25,11,0],[22,11,0],[22,8,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-room-3",
+      "@type": "Room",
+      "skos:prefLabel": "Room 3",
+      "rec:geometry": { "@id": "http://example.org/house/geom-room-3" }
+    },
+    {
+      "@id": "http://example.org/house/geom-room-3",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[25,5,0],[35,5,0],[35,11,0],[25,11,0],[25,5,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-hallway",
+      "@type": "Corridor",
+      "skos:prefLabel": "Hallway",
+      "rec:geometry": { "@id": "http://example.org/house/geom-hallway" }
+    },
+    {
+      "@id": "http://example.org/house/geom-hallway",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[12,11,0],[35,11,0],[35,14,0],[12,14,0],[12,11,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-foyer",
+      "@type": "Lobby",
+      "skos:prefLabel": "Foyer",
+      "rec:geometry": { "@id": "http://example.org/house/geom-foyer" }
+    },
+    {
+      "@id": "http://example.org/house/geom-foyer",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[35,0,0],[42,0,0],[42,14,0],[35,14,0],[35,0,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-common-room",
+      "@type": "Room",
+      "skos:prefLabel": "Common Room",
+      "rec:geometry": { "@id": "http://example.org/house/geom-common-room" }
+    },
+    {
+      "@id": "http://example.org/house/geom-common-room",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[12,14,0],[22,14,0],[22,24,0],[12,24,0],[12,14,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-room-4",
+      "@type": "Room",
+      "skos:prefLabel": "Room 4",
+      "rec:geometry": { "@id": "http://example.org/house/geom-room-4" }
+    },
+    {
+      "@id": "http://example.org/house/geom-room-4",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[22,14,0],[32,14,0],[32,20,0],[22,20,0],[22,14,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-office",
+      "@type": "Office",
+      "skos:prefLabel": "Office",
+      "rec:geometry": { "@id": "http://example.org/house/geom-office" }
+    },
+    {
+      "@id": "http://example.org/house/geom-office",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[32,14,0],[42,14,0],[42,18,0],[32,18,0],[32,14,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-bathroom-4",
+      "@type": "Bathroom",
+      "skos:prefLabel": "Bath room 4",
+      "rec:geometry": { "@id": "http://example.org/house/geom-bathroom-4" }
+    },
+    {
+      "@id": "http://example.org/house/geom-bathroom-4",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[22,20,0],[25,20,0],[25,24,0],[22,24,0],[22,20,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-bathroom-5",
+      "@type": "Bathroom",
+      "skos:prefLabel": "Bath room 5",
+      "rec:geometry": { "@id": "http://example.org/house/geom-bathroom-5" }
+    },
+    {
+      "@id": "http://example.org/house/geom-bathroom-5",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[25,20,0],[28,20,0],[28,24,0],[25,24,0],[25,20,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-bathroom-6",
+      "@type": "Bathroom",
+      "skos:prefLabel": "Bath room 6",
+      "rec:geometry": { "@id": "http://example.org/house/geom-bathroom-6" }
+    },
+    {
+      "@id": "http://example.org/house/geom-bathroom-6",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[28,20,0],[32,20,0],[32,24,0],[28,24,0],[28,20,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-kitchen",
+      "@type": "Kitchen",
+      "skos:prefLabel": "Kitchen",
+      "rec:geometry": { "@id": "http://example.org/house/geom-kitchen" }
+    },
+    {
+      "@id": "http://example.org/house/geom-kitchen",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[32,18,0],[42,18,0],[42,24,0],[32,24,0],[32,18,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/door-room1-hallway",
+      "@type": "Door_Equipment",
+      "skos:prefLabel": "Door Room 1 to Hallway",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-1" },
+      "ex:openingWidthMeters": 0.9,
+      "rec:position": "[28,5,0]"
+    },
+    {
+      "@id": "http://example.org/house/door-room2-hallway",
+      "@type": "Door_Equipment",
+      "skos:prefLabel": "Door Room 2 to Hallway",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-2" },
+      "ex:openingWidthMeters": 0.9,
+      "rec:position": "[18,11,0]"
+    },
+    {
+      "@id": "http://example.org/house/door-room3-hallway",
+      "@type": "Door_Equipment",
+      "skos:prefLabel": "Door Room 3 to Hallway",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-3" },
+      "ex:openingWidthMeters": 0.9,
+      "rec:position": "[30,11,0]"
+    },
+    {
+      "@id": "http://example.org/house/door-room4-common",
+      "@type": "Door_Equipment",
+      "skos:prefLabel": "Door Room 4 to Common Room",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-4" },
+      "ex:openingWidthMeters": 0.9,
+      "rec:position": "[22,17,0]"
+    },
+    {
+      "@id": "http://example.org/house/door-office-hallway",
+      "@type": "Door_Equipment",
+      "skos:prefLabel": "Door Office to Hallway",
+      "isLocatedIn": { "@id": "http://example.org/house/space-office" },
+      "ex:openingWidthMeters": 0.9,
+      "rec:position": "[36,14,0]"
+    },
+    {
+      "@id": "http://example.org/house/door-kitchen-room4",
+      "@type": "Door_Equipment",
+      "skos:prefLabel": "Door Kitchen to Room 4",
+      "isLocatedIn": { "@id": "http://example.org/house/space-kitchen" },
+      "ex:openingWidthMeters": 0.9,
+      "rec:position": "[32,19,0]"
+    },
+    {
+      "@id": "http://example.org/house/window-room1-north",
+      "@type": "Window_Equipment",
+      "skos:prefLabel": "Window Room 1 North",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-1" },
+      "ex:openingWidthMeters": 1.8,
+      "rec:position": "[27,0,0]"
+    },
+    {
+      "@id": "http://example.org/house/window-room3-east",
+      "@type": "Window_Equipment",
+      "skos:prefLabel": "Window Room 3 East",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-3" },
+      "ex:openingWidthMeters": 1.8,
+      "rec:position": "[35,8,0]"
+    },
+    {
+      "@id": "http://example.org/house/window-common-west",
+      "@type": "Window_Equipment",
+      "skos:prefLabel": "Window Common Room West",
+      "isLocatedIn": { "@id": "http://example.org/house/space-common-room" },
+      "ex:openingWidthMeters": 1.8,
+      "rec:position": "[12,19,0]"
+    },
+    {
+      "@id": "http://example.org/house/window-kitchen-east",
+      "@type": "Window_Equipment",
+      "skos:prefLabel": "Window Kitchen East",
+      "isLocatedIn": { "@id": "http://example.org/house/space-kitchen" },
+      "ex:openingWidthMeters": 1.8,
+      "rec:position": "[42,21,0]"
+    },
+
+    {
+      "@id": "http://example.org/house/sensor-room1-temp",
+      "@type": "Temperature_Sensor",
+      "skos:prefLabel": "Room 1 Temperature Sensor",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-1" },
+      "rec:position": "[28,2.5,1.5]"
+    },
+    {
+      "@id": "http://example.org/house/sensor-room2-temp",
+      "@type": "Temperature_Sensor",
+      "skos:prefLabel": "Room 2 Temperature Sensor",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-2" },
+      "rec:position": "[18,8,1.5]"
+    },
+    {
+      "@id": "http://example.org/house/sensor-room3-temp",
+      "@type": "Temperature_Sensor",
+      "skos:prefLabel": "Room 3 Temperature Sensor",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-3" },
+      "rec:position": "[30,8,1.5]"
+    },
+    {
+      "@id": "http://example.org/house/sensor-common-temp",
+      "@type": "Temperature_Sensor",
+      "skos:prefLabel": "Common Room Temperature Sensor",
+      "isLocatedIn": { "@id": "http://example.org/house/space-common-room" },
+      "rec:position": "[18,19,1.5]"
+    },
+    {
+      "@id": "http://example.org/house/sensor-room4-temp",
+      "@type": "Temperature_Sensor",
+      "skos:prefLabel": "Room 4 Temperature Sensor",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-4" },
+      "rec:position": "[28,17,1.5]"
+    },
+    {
+      "@id": "http://example.org/house/sensor-office-temp",
+      "@type": "Temperature_Sensor",
+      "skos:prefLabel": "Office Temperature Sensor",
+      "isLocatedIn": { "@id": "http://example.org/house/space-office" },
+      "rec:position": "[37,16,1.5]"
+    },
+    {
+      "@id": "http://example.org/house/sensor-kitchen-temp",
+      "@type": "Temperature_Sensor",
+      "skos:prefLabel": "Kitchen Temperature Sensor",
+      "isLocatedIn": { "@id": "http://example.org/house/space-kitchen" },
+      "rec:position": "[37,21,1.5]"
+    },
+    {
+      "@id": "http://example.org/house/vav-room1",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Room 1 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-1" },
+      "rec:position": "[22,1,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-room1",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Room 1 Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-1" },
+      "rec:position": "[32,4,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-room2",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Room 2 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-2" },
+      "rec:position": "[14,6,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-room2",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Room 2 Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-2" },
+      "rec:position": "[20,10,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-room3",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Room 3 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-3" },
+      "rec:position": "[27,6,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-room3",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Room 3 Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-3" },
+      "rec:position": "[33,10,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-room4",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Room 4 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-4" },
+      "rec:position": "[25,15,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-room4",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Room 4 Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-room-4" },
+      "rec:position": "[31,19,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-common",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Common Room VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-common-room" },
+      "rec:position": "[14,16,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-common",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Common Room Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-common-room" },
+      "rec:position": "[20,22,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-office",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Office VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-office" },
+      "rec:position": "[35,15,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-office",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Office Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-office" },
+      "rec:position": "[41,17,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-kitchen",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Kitchen VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-kitchen" },
+      "rec:position": "[35,19,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-kitchen",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Kitchen Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-kitchen" },
+      "rec:position": "[41,23,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-foyer",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Foyer VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-foyer" },
+      "rec:position": "[36.5,2,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-foyer",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Foyer Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-foyer" },
+      "rec:position": "[41,12,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-hallway",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Hallway VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-hallway" },
+      "rec:position": "[18,12,2.5]"
+    },
+    {
+      "@id": "http://example.org/house/return-hallway",
+      "@type": "Return_Air_Grille",
+      "skos:prefLabel": "Hallway Return Grille",
+      "isLocatedIn": { "@id": "http://example.org/house/space-hallway" },
+      "rec:position": "[29,12.5,2.3]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-bath1",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Bathroom 1 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-bathroom-1" },
+      "rec:position": "[13.5,1.25,2.5]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-mudroom",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Mudroom VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-hallway-mudroom" },
+      "rec:position": "[13.5,3.75,2.5]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-bath2",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Bathroom 2 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-bathroom-2" },
+      "rec:position": "[23.5,6.5,2.5]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-bath3",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Bathroom 3 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-bathroom-3" },
+      "rec:position": "[23.5,9.5,2.5]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-bath4",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Bathroom 4 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-bathroom-4" },
+      "rec:position": "[23.5,22,2.5]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-bath5",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Bathroom 5 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-bathroom-5" },
+      "rec:position": "[26.5,22,2.5]"
+    },
+
+    {
+      "@id": "http://example.org/house/vav-bath6",
+      "@type": "VAV_Box",
+      "skos:prefLabel": "Bathroom 6 VAV Box",
+      "isLocatedIn": { "@id": "http://example.org/house/space-bathroom-6" },
+      "rec:position": "[30,22,2.5]"
+    },
+
+    {
+      "@id": "http://example.org/house/space-plenum-main",
+      "@type": "Plenum",
+      "skos:prefLabel": "Main Supply Plenum",
+      "rdfs:comment": "Ceiling plenum serving the main occupied zone. Receives conditioned air from AHU-01 and distributes it via VAV boxes.",
+      "rec:geometry": { "@id": "http://example.org/house/geom-plenum-main" }
+    },
+    {
+      "@id": "http://example.org/house/geom-plenum-main",
+      "@type": "rec:Polygon",
+      "rec:coordinateSystem": "LocalPlanCS",
+      "rec:coordinates": "[[12,0,0],[42,0,0],[42,24,0],[12,24,0],[12,0,0]]"
+    },
+
+    {
+      "@id": "http://example.org/house/ahu-01",
+      "@type": "Air_Handling_Unit",
+      "skos:prefLabel": "AHU-01 (Main Air Handler)",
+      "isLocatedIn": { "@id": "http://example.org/house/space-outdoor" },
+      "feeds": { "@id": "http://example.org/house/space-plenum-main" },
+      "rec:position": "[4,19,0]"
+    },
+    {
+      "@id": "http://example.org/house/hx-01",
+      "@type": "Heat_Exchanger",
+      "skos:prefLabel": "HX-01 (Heat Recovery Exchanger)",
+      "isLocatedIn": { "@id": "http://example.org/house/space-outdoor" },
+      "feeds": { "@id": "http://example.org/house/ahu-01" },
+      "rec:position": "[4,15,0]"
+    },
+    {
+      "@id": "http://example.org/house/damper-oa",
+      "@type": "Outside_Air_Damper",
+      "skos:prefLabel": "OAD-01 (Outdoor Air Damper)",
+      "isLocatedIn": { "@id": "http://example.org/house/space-outdoor" },
+      "feeds": { "@id": "http://example.org/house/hx-01" },
+      "rec:position": "[1.5,12,0]"
+    },
+    {
+      "@id": "http://example.org/house/damper-ra",
+      "@type": "Return_Air_Damper",
+      "skos:prefLabel": "RAD-01 (Return Air Damper)",
+      "isLocatedIn": { "@id": "http://example.org/house/space-outdoor" },
+      "feeds": { "@id": "http://example.org/house/ahu-01" },
+      "rec:position": "[8,20,0]"
+    },
+    {
+      "@id": "http://example.org/house/damper-ex",
+      "@type": "Exhaust_Air_Damper",
+      "skos:prefLabel": "EXD-01 (Exhaust Air Damper)",
+      "isLocatedIn": { "@id": "http://example.org/house/space-outdoor" },
+      "rec:position": "[1.5,22,0]"
+    }
+  ]
+}

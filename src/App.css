@@ -1,0 +1,126 @@
+:root {
+  --ink: #1f1b16;
+  --paper: #f7f1e7;
+  --panel: #efe5d5;
+  --accent: #9f2d2d;
+  --border: #3d362d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Avenir Next', 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 20% 10%, #f9edd3 0%, rgba(249, 237, 211, 0) 40%),
+    radial-gradient(circle at 90% 90%, #f0dbc8 0%, rgba(240, 219, 200, 0) 45%),
+    var(--paper);
+}
+
+.app-shell {
+  margin: 0 auto;
+  max-width: 1080px;
+  min-height: 100dvh;
+  padding: 2rem 1rem 3rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  letter-spacing: 0.02em;
+}
+
+.app-header p {
+  margin-top: 0.5rem;
+  max-width: 64ch;
+}
+
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.controls-row label {
+  font-weight: 600;
+}
+
+.controls-row select,
+.controls-row button {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: #fff7e9;
+  color: var(--ink);
+  font: inherit;
+  padding: 0.35rem 0.6rem;
+}
+
+.controls-row button {
+  cursor: pointer;
+}
+
+.map-panel {
+  margin-top: 1.5rem;
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 12px 40px rgba(61, 54, 45, 0.2);
+}
+
+.hvac-panel {
+  margin-top: 1rem;
+}
+
+.panel-title {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid rgba(61, 54, 45, 0.22);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #3f3f46;
+  background: rgba(255, 247, 233, 0.82);
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.info-grid article {
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: #fff7e9;
+}
+
+.info-grid h2 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+}
+
+.info-grid p,
+.info-grid li {
+  margin: 0.2rem 0;
+  font-size: 0.92rem;
+}
+
+.info-grid ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+@media (max-width: 980px) {
+  .map-panel {
+    overflow-x: auto;
+  }
+}
