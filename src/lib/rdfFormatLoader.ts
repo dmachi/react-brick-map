@@ -128,6 +128,7 @@ function extractBrickRecSourceFromJsonLd(
   const spaces: BrickRecSpaceSource[] = [];
   const assets: BrickRecAssetSource[] = [];
   const spatialNodeById = new Map<string, BrickRecSpatialNodeSource>();
+  const spaceEquipmentIds = new Set<string>();
   const seenSpaces = new Set<string>();
   const seenAssets = new Set<string>();
 
@@ -149,6 +150,15 @@ function extractBrickRecSourceFromJsonLd(
       parentId,
       geometry,
     });
+
+    if (isSpaceLike(node)) {
+      for (const value of getValues(node, `${BRICK_NS}hasEquipment`)) {
+        const equipmentId = getReferenceId(value);
+        if (equipmentId) {
+          spaceEquipmentIds.add(equipmentId);
+        }
+      }
+    }
   }
 
   for (const node of graphNodes) {
@@ -184,7 +194,7 @@ function extractBrickRecSourceFromJsonLd(
       assets.push({
         id,
         label: getLabel(node, nodeIndex, 'Unnamed Asset'),
-        type: inferAssetType(node),
+        type: inferAssetType(node, nodeIndex, spaceEquipmentIds),
         brickClass: getPrimaryType(node),
         spaceId: extractSpaceId(node, nodeIndex),
         parentId: extractParentId(node, nodeIndex, parentByChild),
@@ -683,13 +693,41 @@ function isAssetLike(node: JsonLdNode): boolean {
     );
 }
 
-function inferAssetType(node: JsonLdNode): string {
+function hasPointReference(node: JsonLdNode, nodeIndex: Map<string, JsonLdNode>): boolean {
+  for (const value of getValues(node, `${BRICK_NS}hasPoint`)) {
+    const pointRef = getReferenceId(value);
+    if (!pointRef) {
+      continue;
+    }
+
+    const pointNode = nodeIndex.get(pointRef);
+    if (pointNode) {
+      return true;
+    }
+
+    if (pointRef) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function inferAssetType(
+  node: JsonLdNode,
+  nodeIndex: Map<string, JsonLdNode>,
+  spaceEquipmentIds: Set<string>,
+): string {
   const typeNames = getTypeNames(node).map((typeName) => getLocalName(typeName).toLowerCase());
   if (typeNames.some((typeName) => typeName.includes('sensor'))) {
     return 'sensor';
   }
   if (typeNames.some((typeName) => typeName.includes('actuator'))) {
     return 'actuator';
+  }
+  const nodeId = getNodeId(node);
+  if (nodeId && spaceEquipmentIds.has(nodeId) && hasPointReference(node, nodeIndex)) {
+    return 'sensor';
   }
   return 'equipment';
 }
@@ -1191,7 +1229,13 @@ function extractBrickRecSource(store: Store, buildingId: string): BrickRecSource
   const assets: BrickRecAssetSource[] = [];
   const hvacNodes: BrickRecHvacNodeSource[] = [];
   const assetIdByUri = new Map<string, string>();
+  const spaceEquipmentUris = new Set<string>();
   const seen = new Set<string>();
+
+  const hasEquipmentNode = createNamedNode(BRICK + 'hasEquipment');
+  for (const quad of store.match(null, hasEquipmentNode, null)) {
+    spaceEquipmentUris.add(quad.object.value);
+  }
 
   assetSubjects.forEach((subject: any) => {
     const id = subject.value.split(/[#/]/).pop() || 'asset-unknown';
@@ -1199,7 +1243,7 @@ function extractBrickRecSource(store: Store, buildingId: string): BrickRecSource
     seen.add(id);
 
     const assetLabel = getLabel(subject);
-    const assetType = getAssetType(subject, store);
+    const assetType = getAssetType(subject, store, spaceEquipmentUris);
 
     hvacNodes.push({
       id,
@@ -1486,14 +1530,33 @@ function extractGeometryFromStore(store: Store, geomSubject: any, REC: string): 
 /**
  * Determine asset type (sensor, equipment, etc.) from BRICK class
  */
-function getAssetType(subject: any, store: Store): string {
+function hasPointReferenceInStore(subject: any, store: Store): boolean {
+  const hasPoint = createNamedNode('https://brickschema.org/schema/Brick#hasPoint');
+
+  for (const pointQuad of store.match(subject, hasPoint, null)) {
+    if (pointQuad.object.value) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getAssetType(subject: any, store: Store, spaceEquipmentUris: Set<string>): string {
   const rdfType = createNamedNode('http://www.w3.org/1999/02/22-rdf-syntax-ns#type');
 
   for (const quad of store.match(subject, rdfType, null)) {
     const uri = quad.object.value;
     if (uri.includes('Sensor')) return 'sensor';
-    if (uri.includes('Equipment')) return 'equipment';
     if (uri.includes('Actuator')) return 'actuator';
+  }
+
+  if (spaceEquipmentUris.has(subject.value) && hasPointReferenceInStore(subject, store)) {
+    return 'sensor';
+  }
+
+  for (const quad of store.match(subject, rdfType, null)) {
+    if (quad.object.value.includes('Equipment')) return 'equipment';
   }
 
   return 'asset';

@@ -352,6 +352,62 @@ export type BuildingMapProps = {
   showControls?: boolean;
 };
 
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const clean = hex.trim();
+  const short = clean.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+  if (short) {
+    return {
+      r: parseInt(short[1] + short[1], 16),
+      g: parseInt(short[2] + short[2], 16),
+      b: parseInt(short[3] + short[3], 16),
+    };
+  }
+  const full = clean.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (full) {
+    return {
+      r: parseInt(full[1], 16),
+      g: parseInt(full[2], 16),
+      b: parseInt(full[3], 16),
+    };
+  }
+  return null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function makeGradientStops(fill: string): (number | string)[] {
+  const rgb = hexToRgb(fill);
+  if (!rgb) {
+    return [0, fill, 1, fill];
+  }
+  const { r, g, b } = rgb;
+  const lightR = clamp(Math.round(r + (255 - r) * 0.22), 0, 255);
+  const lightG = clamp(Math.round(g + (255 - g) * 0.22), 0, 255);
+  const lightB = clamp(Math.round(b + (255 - b) * 0.22), 0, 255);
+  const darkR = clamp(Math.round(r * 0.84), 0, 255);
+  const darkG = clamp(Math.round(g * 0.84), 0, 255);
+  const darkB = clamp(Math.round(b * 0.84), 0, 255);
+  return [
+    0, `rgb(${lightR},${lightG},${lightB})`,
+    1, `rgb(${darkR},${darkG},${darkB})`,
+  ];
+}
+
+function computeBoundingBox(ring: Ring): { minX: number; minY: number; maxX: number; maxY: number } {
+  if (ring.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  let minX = ring[0].x, maxX = ring[0].x;
+  let minY = ring[0].y, maxY = ring[0].y;
+  for (const p of ring) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
 function centroidOfRing(ring: Ring): XY {
   if (ring.length === 0) {
     return { x: 0, y: 0 };
@@ -788,14 +844,23 @@ export function BuildingMap({
 
               if (space.geometry.type === 'Polygon') {
                 const centroid = centroidOfRing(space.geometry.rings[0] ?? []);
+                const bbox = computeBoundingBox(space.geometry.rings[0] ?? []);
+                const gradientStops = makeGradientStops(fill);
                 return (
                   <Group key={space.id}>
                     <Line
                       points={flattenRings(space.geometry.rings)}
                       closed
-                      fill={fill}
+                      fillLinearGradientStartPoint={{ x: bbox.minX, y: bbox.minY }}
+                      fillLinearGradientEndPoint={{ x: bbox.maxX, y: bbox.maxY }}
+                      fillLinearGradientColorStops={gradientStops}
                       stroke={spaceStyle.stroke}
                       strokeWidth={1 / viewport.scale}
+                      shadowColor="rgba(0,0,0,0.22)"
+                      shadowBlur={12 / viewport.scale}
+                      shadowOffsetX={3 / viewport.scale}
+                      shadowOffsetY={4 / viewport.scale}
+                      shadowOpacity={1}
                       onMouseEnter={() => setHoveredSpaceId(space.id)}
                       onMouseLeave={() => setHoveredSpaceId(null)}
                       onClick={() => onSpaceClick?.(space)}
@@ -824,19 +889,31 @@ export function BuildingMap({
                 );
               }
 
-              return space.geometry.polygons.map((polygon, polygonIndex) => (
-                <Line
-                  key={`${space.id}-${polygonIndex}`}
-                  points={flattenRings(polygon)}
-                  closed
-                  fill={fill}
-                  stroke={spaceStyle.stroke}
-                  strokeWidth={1 / viewport.scale}
-                  onMouseEnter={() => setHoveredSpaceId(space.id)}
-                  onMouseLeave={() => setHoveredSpaceId(null)}
-                  onClick={() => onSpaceClick?.(space)}
-                />
-              ));
+              return space.geometry.polygons.map((polygon, polygonIndex) => {
+                const polyRing = polygon[0] ?? [];
+                const polyBbox = computeBoundingBox(polyRing);
+                const polyGradientStops = makeGradientStops(fill);
+                return (
+                  <Line
+                    key={`${space.id}-${polygonIndex}`}
+                    points={flattenRings(polygon)}
+                    closed
+                    fillLinearGradientStartPoint={{ x: polyBbox.minX, y: polyBbox.minY }}
+                    fillLinearGradientEndPoint={{ x: polyBbox.maxX, y: polyBbox.maxY }}
+                    fillLinearGradientColorStops={polyGradientStops}
+                    stroke={spaceStyle.stroke}
+                    strokeWidth={1 / viewport.scale}
+                    shadowColor="rgba(0,0,0,0.22)"
+                    shadowBlur={12 / viewport.scale}
+                    shadowOffsetX={3 / viewport.scale}
+                    shadowOffsetY={4 / viewport.scale}
+                    shadowOpacity={1}
+                    onMouseEnter={() => setHoveredSpaceId(space.id)}
+                    onMouseLeave={() => setHoveredSpaceId(null)}
+                    onClick={() => onSpaceClick?.(space)}
+                  />
+                );
+              });
             })}
 
             {layers.hvac && model.spaces.filter(isPlenumSpace).map((space) => {
