@@ -437,6 +437,10 @@ type WallFrame = {
   ty: number;
   nx: number;
   ny: number;
+  closestX: number;
+  closestY: number;
+  inwardNx: number;
+  inwardNy: number;
 };
 
 function getPrimaryRing(space: SpaceEntity): Ring {
@@ -466,6 +470,13 @@ function pointSegmentDistanceSquared(point: XY, a: XY, b: XY): { dist2: number; 
   const dx = point.x - cx;
   const dy = point.y - cy;
   return { dist2: dx * dx + dy * dy, t };
+}
+
+function projectPointToSegment(a: XY, b: XY, t: number): XY {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  };
 }
 
 function findNearestWallFrame(point: XY, space?: SpaceEntity): WallFrame | null {
@@ -510,7 +521,48 @@ function findNearestWallFrame(point: XY, space?: SpaceEntity): WallFrame | null 
   const nx = -ty;
   const ny = tx;
 
-  return { tx, ty, nx, ny };
+  const nearestResult = pointSegmentDistanceSquared(point, bestA, bestB);
+  const closestPoint = projectPointToSegment(bestA, bestB, nearestResult.t);
+  const centroid = centroidOfRing(ring);
+  const toCentroidX = centroid.x - closestPoint.x;
+  const toCentroidY = centroid.y - closestPoint.y;
+
+  const oppositeNx = ty;
+  const oppositeNy = -tx;
+  const normalDot = toCentroidX * nx + toCentroidY * ny;
+  const oppositeDot = toCentroidX * oppositeNx + toCentroidY * oppositeNy;
+  const inwardNx = normalDot >= oppositeDot ? nx : oppositeNx;
+  const inwardNy = normalDot >= oppositeDot ? ny : oppositeNy;
+
+  return {
+    tx,
+    ty,
+    nx,
+    ny,
+    closestX: closestPoint.x,
+    closestY: closestPoint.y,
+    inwardNx,
+    inwardNy,
+  };
+}
+
+function insetPointInsideSpace(point: XY, insetDistance: number, wallFrame: WallFrame | null): XY {
+  if (!wallFrame || insetDistance <= 0) {
+    return point;
+  }
+
+  const dx = point.x - wallFrame.closestX;
+  const dy = point.y - wallFrame.closestY;
+  const distanceInside = dx * wallFrame.inwardNx + dy * wallFrame.inwardNy;
+  if (distanceInside >= insetDistance) {
+    return point;
+  }
+
+  const requiredShift = insetDistance - distanceInside;
+  return {
+    x: point.x + wallFrame.inwardNx * requiredShift,
+    y: point.y + wallFrame.inwardNy * requiredShift,
+  };
 }
 
 function getAllPoints(model: CanonicalBuildingMapModel): XY[] {
@@ -967,6 +1019,8 @@ export function BuildingMap({
               const windowTy = wallFrame?.ty ?? 0;
               const windowNx = wallFrame?.nx ?? 0;
               const windowNy = wallFrame?.ny ?? 1;
+              const iconInsetDistance = assetStyle.radius / viewport.scale;
+              const iconPosition = insetPointInsideSpace(asset.position, iconInsetDistance, wallFrame);
 
               const updateHoverFromEvent = (event: any) => {
                 const pointer = event.target.getStage()?.getPointerPosition();
@@ -1052,8 +1106,8 @@ export function BuildingMap({
                   ) : (
                     <>
                       <Circle
-                        x={asset.position.x}
-                        y={asset.position.y}
+                        x={iconPosition.x}
+                        y={iconPosition.y}
                         radius={assetStyle.radius / viewport.scale}
                         fill={assetStyle.fill}
                         stroke={assetStyle.stroke}
@@ -1061,8 +1115,8 @@ export function BuildingMap({
                       />
                       {assetStyle.icon ? (
                         <Text
-                          x={asset.position.x}
-                          y={asset.position.y}
+                          x={iconPosition.x}
+                          y={iconPosition.y}
                           text={assetStyle.icon}
                           fontSize={6 / viewport.scale}
                           fill={assetStyle.iconColor ?? assetStyle.labelColor}
