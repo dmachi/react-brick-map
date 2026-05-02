@@ -4,14 +4,15 @@ import type {
   AnnotationEntity,
   AssetEntity,
   CanonicalBuildingMapModel,
-  LayerVisibility,
+  LayerData,
+  LayerDefinition,
+  LayerQueryContext,
   Ring,
   SpaceEntity,
   XY,
 } from './types';
-import { DEFAULT_LAYER_VISIBILITY } from './types';
-import { createRdfStore, type RdfStore } from './rdfStore';
-import { buildAssetTooltip, getNumericAssetMetadata } from './geometryUtils';
+import { createRdfStore, selectRdfStore, type RdfStore } from './rdfStore';
+import { buildAssetTooltip, getNumericAssetMetadata, resolveLayerPosition } from './geometryUtils';
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
@@ -267,22 +268,6 @@ function isFloorPlanAsset(asset: AssetEntity): boolean {
   return isDoorAsset(asset) || isWindowAsset(asset);
 }
 
-function isSensorAsset(asset: AssetEntity): boolean {
-  const localClass = normalizeBrickKey(asset.brickClass);
-  const typeKey = (asset.type ?? '').toLowerCase();
-  // Thermostats go in the sensor layer by explicit design decision.
-  if (localClass.includes('thermostat')) return true;
-  return typeKey === 'sensor' || localClass.includes('sensor');
-}
-
-function isHvacAsset(asset: AssetEntity): boolean {
-  return !isFloorPlanAsset(asset) && !isSensorAsset(asset);
-}
-
-function isPlenumSpace(space: SpaceEntity): boolean {
-  return normalizeBrickKey(space.brickClass) === 'plenum';
-}
-
 function computePolygonArea(ring: Ring): number {
   let area = 0;
   for (let i = 0; i < ring.length - 1; i++) {
@@ -319,8 +304,11 @@ export type BuildingMapProps = {
   onViewportChange?: (viewport: { x: number; y: number; scale: number }) => void;
   onSpaceClick?: (space: SpaceEntity) => void;
   onAssetClick?: (asset: AssetEntity) => void;
-  visibleLayers?: Partial<LayerVisibility>;
-  onLayerToggle?: (layer: keyof LayerVisibility) => void;
+  /** External layer definitions provided by the consuming application. */
+  layers?: LayerDefinition[];
+  /** Visibility state keyed by layer id. The reserved id "floorPlan" controls the built-in layer. */
+  visibleLayers?: Record<string, boolean>;
+  onLayerToggle?: (layerId: string) => void;
   // Typed partial overrides for TypeScript consumers.
   theme?: BuildingMapThemeOverrides;
   // Dictionary overrides for runtime-configurable theming sources.
@@ -613,6 +601,11 @@ function findAnchorForAnnotation(annotation: AnnotationEntity, model: CanonicalB
   return { x: 0, y: 0 };
 }
 
+type LayerStatus =
+  | { status: 'loading' }
+  | { status: 'loaded'; data: LayerData }
+  | { status: 'error'; error: string };
+
 export function BuildingMap({
   model,
   rdfStore,
@@ -627,13 +620,14 @@ export function BuildingMap({
   onViewportChange,
   onSpaceClick,
   onAssetClick,
+  layers: layerDefinitions,
   visibleLayers,
   onLayerToggle,
   theme,
   themeOverrides,
   showControls = false,
 }: BuildingMapProps) {
-  const layers: LayerVisibility = { ...DEFAULT_LAYER_VISIBILITY, ...visibleLayers };
+  const floorPlanVisible = visibleLayers?.floorPlan ?? true;
   const activeRdfStore = useMemo(() => rdfStore ?? createRdfStore(), [rdfStore]);
   const graphStatementCount = activeRdfStore.statements.length;
   const [isExpanded, setIsExpanded] = useState(false);
@@ -645,6 +639,8 @@ export function BuildingMap({
   const mapHeight = isExpanded ? windowSize.height : height;
   const [hoveredSpaceId, setHoveredSpaceId] = useState<string | null>(null);
   const [hoveredAsset, setHoveredAsset] = useState<{ asset: AssetEntity; x: number; y: number } | null>(null);
+  const [hoveredMarker, setHoveredMarker] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [layerStatuses, setLayerStatuses] = useState<Record<string, LayerStatus>>({});
   const viewportChangeRef = useRef(onViewportChange);
   const resolvedTheme = useMemo(
     () => resolveTheme(theme, themeOverrides),
@@ -654,6 +650,73 @@ export function BuildingMap({
   useEffect(() => {
     viewportChangeRef.current = onViewportChange;
   }, [onViewportChange]);
+
+  // Invalidate layer cache when the RDF store changes.
+  useEffect(() => {
+    setLayerStatuses({});
+  }, [graphStatementCount]);
+
+  // Fetch data for visible external layers that have no cached result.
+  useEffect(() => {
+    if (!layerDefinitions || layerDefinitions.length === 0) return;
+    const ctx: LayerQueryContext = { model, rdfStore: activeRdfStore };
+    const toFetch = layerDefinitions.filter((def) => {
+      const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
+      return isVisible && !layerStatuses[def.id];
+    });
+    if (toFetch.length === 0) return;
+    setLayerStatuses((prev) => {
+      const next = { ...prev };
+      for (const def of toFetch) next[def.id] = { status: 'loading' };
+      return next;
+    });
+    let cancelled = false;
+    for (const def of toFetch) {
+      const id = def.id;
+      const doFetch = async () => {
+        try {
+          let data: LayerData;
+          if (def.type === 'sparql') {
+            const rows = await selectRdfStore(activeRdfStore, def.query);
+            if (cancelled) return;
+            data = def.mapResults(rows, ctx);
+          } else if (def.type === 'sparql-fn') {
+            const rows = await selectRdfStore(activeRdfStore, def.getQuery(ctx));
+            if (cancelled) return;
+            data = def.mapResults(rows, ctx);
+          } else {
+            data = await Promise.resolve(def.getData(ctx));
+            if (cancelled) return;
+          }
+          setLayerStatuses((prev) => ({ ...prev, [id]: { status: 'loaded', data } }));
+        } catch (err) {
+          if (cancelled) return;
+          const error = err instanceof Error ? err.message : 'Layer load failed';
+          setLayerStatuses((prev) => ({ ...prev, [id]: { status: 'error', error } }));
+        }
+      };
+      void doFetch();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [layerDefinitions, visibleLayers, layerStatuses, graphStatementCount, model, activeRdfStore]);
+
+  const { floorLayerData, wallsLayerData, overlayLayerData } = useMemo(() => {
+    const floor: LayerData[] = [];
+    const walls: LayerData[] = [];
+    const overlay: LayerData[] = [];
+    if (!layerDefinitions || layerDefinitions.length === 0) return { floorLayerData: floor, wallsLayerData: walls, overlayLayerData: overlay };
+    for (const def of layerDefinitions) {
+      const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
+      if (!isVisible) continue;
+      const s = layerStatuses[def.id];
+      if (s?.status !== 'loaded') continue;
+      const bucket = def.renderOrder === 'floor' ? floor : def.renderOrder === 'walls' ? walls : overlay;
+      bucket.push(s.data);
+    }
+    return { floorLayerData: floor, wallsLayerData: walls, overlayLayerData: overlay };
+  }, [layerDefinitions, visibleLayers, layerStatuses]);
 
   useEffect(() => {
     if (!isExpanded) {
@@ -737,18 +800,23 @@ export function BuildingMap({
   const stageWidth = Math.max(mapWidth, Math.round(mapWidth * overflowScale));
   const stageHeight = Math.max(mapHeight, Math.round(mapHeight * overflowScale));
 
-  const tooltipText = hoveredAsset ? buildAssetTooltip(hoveredAsset.asset) : '';
+  const activeTooltip = hoveredMarker ?? (hoveredAsset ? {
+    text: buildAssetTooltip(hoveredAsset.asset),
+    x: hoveredAsset.x,
+    y: hoveredAsset.y,
+  } : null);
+  const tooltipText = activeTooltip?.text ?? '';
   const tooltipLines = tooltipText ? tooltipText.split('\n') : [];
   const tooltipWidth = Math.max(
     120,
     ...tooltipLines.map((line) => Math.round(line.length * 6.5 + 12)),
   );
   const tooltipHeight = Math.max(24, tooltipLines.length * 14 + 10);
-  const tooltipX = hoveredAsset
-    ? Math.min(Math.max(8, hoveredAsset.x + 12), Math.max(8, stageWidth - tooltipWidth - 8))
+  const tooltipX = activeTooltip
+    ? Math.min(Math.max(8, activeTooltip.x + 12), Math.max(8, stageWidth - tooltipWidth - 8))
     : 0;
-  const tooltipY = hoveredAsset
-    ? Math.min(Math.max(8, hoveredAsset.y + 12), Math.max(8, stageHeight - tooltipHeight - 8))
+  const tooltipY = activeTooltip
+    ? Math.min(Math.max(8, activeTooltip.y + 12), Math.max(8, stageHeight - tooltipHeight - 8))
     : 0;
 
   return (
@@ -858,7 +926,72 @@ export function BuildingMap({
               />
             ) : null}
 
-            {layers.floorPlan && model.spaces.filter(space => !isPlenumSpace(space)).map((space) => {
+            {/* renderOrder='floor': before space fills */}
+            {floorLayerData.map((data, li) => [
+              ...(data.spaces ?? []).flatMap((item) => {
+                const space = model.spaces.find((s) => s.id === item.spaceId);
+                if (!space) return [];
+                const ringGroups = space.geometry.type === 'Polygon' ? [space.geometry.rings] : space.geometry.polygons;
+                return ringGroups.map((rg, pi) => (
+                  <Line key={`fl-sp-${li}-${item.spaceId}-${pi}`} points={flattenRings(rg)} closed
+                    fill={item.fill ?? 'transparent'} opacity={item.fillOpacity ?? 0.5}
+                    stroke={item.stroke} strokeWidth={item.strokeWidth != null ? item.strokeWidth / viewport.scale : 0}
+                    strokeOpacity={item.strokeOpacity ?? 1} listening={false} />
+                ));
+              }),
+              ...(data.markers ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                const r = (item.radius ?? 5) / viewport.scale;
+                const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const shape = item.shape ?? 'circle';
+                return (
+                  <Group key={`fl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {shape === 'circle' ? (
+                      <Circle x={pt.x} y={pt.y} radius={r}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : shape === 'rect' ? (
+                      <Rect x={pt.x - w / 2} y={pt.y - h / 2} width={w} height={h}
+                        rotation={item.rotation ?? 0} offsetX={0} offsetY={0}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : (
+                      <Rect x={pt.x} y={pt.y} width={w} height={h}
+                        rotation={(item.rotation ?? 0) + 45}
+                        offsetX={w / 2} offsetY={h / 2}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    )}
+                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
+                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
+                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                  </Group>
+                );
+              }),
+              ...(data.annotations ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                return (
+                  <Text key={`fl-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
+                    text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
+                    fontSize={(item.fontSize ?? 10) / viewport.scale} listening={false} />
+                );
+              }),
+              ...(data.custom ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                return (
+                  <Group key={`fl-cu-${li}-${item.id}`}
+                    onClick={() => item.onClick?.()}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {item.render(pt, viewport.scale)}
+                  </Group>
+                );
+              }),
+            ])}
+
+            {floorPlanVisible && model.spaces.map((space) => {
               const isSelected = selectedSpaceId === space.id;
               const isHovered = hoveredSpaceId === space.id;
               const spaceStyle = resolveSpaceStyle(resolvedTheme, space);
@@ -944,42 +1077,72 @@ export function BuildingMap({
               });
             })}
 
-            {layers.hvac && model.spaces.filter(isPlenumSpace).map((space) => {
-              if (space.geometry.type !== 'Polygon') return null;
-              const centroid = centroidOfRing(space.geometry.rings[0] ?? []);
-              return (
-                <Group key={`plenum-${space.id}`}>
-                  <Line
-                    points={flattenRings(space.geometry.rings)}
-                    closed
-                    fill="rgba(224, 242, 254, 0.22)"
-                    stroke="#0ea5e9"
-                    strokeWidth={2 / viewport.scale}
-                    dash={[1.5 / viewport.scale, 0.8 / viewport.scale]}
-                    onMouseEnter={() => setHoveredSpaceId(space.id)}
-                    onMouseLeave={() => setHoveredSpaceId(null)}
-                    onClick={() => onSpaceClick?.(space)}
-                  />
-                  <Text
-                    x={centroid.x}
-                    y={centroid.y}
-                    text={space.label}
-                    fontSize={14 / viewport.scale}
-                    fill="#0ea5e9"
-                    opacity={0.6}
-                    offsetX={(space.label.length * 3.5) / viewport.scale}
-                    offsetY={7 / viewport.scale}
-                  />
-                </Group>
-              );
-            })}
+            {/* renderOrder='walls': after spaces, before assets (no walls in 2D) */}
+            {wallsLayerData.map((data, li) => [
+              ...(data.spaces ?? []).flatMap((item) => {
+                const space = model.spaces.find((s) => s.id === item.spaceId);
+                if (!space) return [];
+                const ringGroups = space.geometry.type === 'Polygon' ? [space.geometry.rings] : space.geometry.polygons;
+                return ringGroups.map((rg, pi) => (
+                  <Line key={`wl-sp-${li}-${item.spaceId}-${pi}`} points={flattenRings(rg)} closed
+                    fill={item.fill ?? 'transparent'} opacity={item.fillOpacity ?? 0.5}
+                    stroke={item.stroke} strokeWidth={item.strokeWidth != null ? item.strokeWidth / viewport.scale : 0}
+                    strokeOpacity={item.strokeOpacity ?? 1} listening={false} />
+                ));
+              }),
+              ...(data.markers ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                const r = (item.radius ?? 5) / viewport.scale;
+                const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const shape = item.shape ?? 'circle';
+                return (
+                  <Group key={`wl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {shape === 'circle' ? (
+                      <Circle x={pt.x} y={pt.y} radius={r}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : shape === 'rect' ? (
+                      <Rect x={pt.x - w / 2} y={pt.y - h / 2} width={w} height={h}
+                        rotation={item.rotation ?? 0}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : (
+                      <Rect x={pt.x} y={pt.y} width={w} height={h}
+                        rotation={(item.rotation ?? 0) + 45}
+                        offsetX={w / 2} offsetY={h / 2}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    )}
+                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
+                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
+                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                  </Group>
+                );
+              }),
+              ...(data.annotations ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                return (
+                  <Text key={`wl-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
+                    text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
+                    fontSize={(item.fontSize ?? 10) / viewport.scale} listening={false} />
+                );
+              }),
+              ...(data.custom ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                return (
+                  <Group key={`wl-cu-${li}-${item.id}`}
+                    onClick={() => item.onClick?.()}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {item.render(pt, viewport.scale)}
+                  </Group>
+                );
+              }),
+            ])}
 
-            {model.assets.filter((asset) => {
-              if (isFloorPlanAsset(asset)) return layers.floorPlan;
-              if (isSensorAsset(asset)) return layers.sensors;
-              if (isHvacAsset(asset)) return layers.hvac;
-              return layers.floorPlan;
-            }).map((asset) => {
+            {floorPlanVisible && model.assets.filter(isFloorPlanAsset).map((asset) => {
               const assetStyle = resolveAssetStyle(resolvedTheme, asset);
               const doorAsset = isDoorAsset(asset);
               const windowAsset = isWindowAsset(asset);
@@ -1106,18 +1269,7 @@ export function BuildingMap({
               );
             })}
 
-            {model.annotations.filter((annotation) => {
-              if (annotation.targetType === 'asset') {
-                const asset = model.assets.find((a) => a.id === annotation.targetId);
-                if (asset) {
-                  if (isFloorPlanAsset(asset)) return layers.floorPlan;
-                  if (isSensorAsset(asset)) return layers.sensors;
-                  if (isHvacAsset(asset)) return layers.hvac;
-                }
-              }
-              if (annotation.targetType === 'space') return layers.floorPlan;
-              return layers.floorPlan;
-            }).map((annotation) => {
+            {floorPlanVisible && model.annotations.map((annotation) => {
               const anchor = findAnchorForAnnotation(annotation, model);
               return (
                 <Text
@@ -1131,55 +1283,74 @@ export function BuildingMap({
               );
             })}
 
-            {layers.roomMetrics && model.spaces.map((space) => {
-              const { area, width, height: spaceHeight } = computeSpaceMetrics(space);
-              if (area < 0.01) return null;
-              const ring = getPrimaryRing(space);
-              const centroid = centroidOfRing(ring);
-              const areaStr = area.toFixed(1);
-              const dimsStr = `${width.toFixed(1)} × ${spaceHeight.toFixed(1)}`;
-              const volumeRaw = space.metadata?.volume;
-              const volumeStr = typeof volumeRaw === 'number' ? `${volumeRaw.toFixed(1)} m\u00b3` : null;
-              const fontSize = 9 / viewport.scale;
-              const lineGap = 11 / viewport.scale;
-              return (
-                <Group key={`metrics-${space.id}`}>
-                  <Text
-                    x={centroid.x}
-                    y={centroid.y + lineGap}
-                    text={dimsStr}
-                    fontSize={fontSize}
-                    fill="#1e40af"
-                    offsetX={(dimsStr.length * 2.6) / viewport.scale}
-                    offsetY={fontSize / 2}
-                  />
-                  <Text
-                    x={centroid.x}
-                    y={centroid.y + lineGap * 2}
-                    text={`${areaStr}\u00b2`}
-                    fontSize={fontSize}
-                    fill="#1e40af"
-                    offsetX={(`${areaStr}\u00b2`.length * 2.6) / viewport.scale}
-                    offsetY={fontSize / 2}
-                  />
-                  {volumeStr ? (
-                    <Text
-                      x={centroid.x}
-                      y={centroid.y + lineGap * 3}
-                      text={volumeStr}
-                      fontSize={fontSize}
-                      fill="#1e40af"
-                      offsetX={(volumeStr.length * 2.6) / viewport.scale}
-                      offsetY={fontSize / 2}
-                    />
-                  ) : null}
-                </Group>
-              );
-            })}
+            {/* renderOrder='overlay': after all geometry, assets, annotations */}
+            {overlayLayerData.map((data, li) => [
+              ...(data.spaces ?? []).flatMap((item) => {
+                const space = model.spaces.find((s) => s.id === item.spaceId);
+                if (!space) return [];
+                const ringGroups = space.geometry.type === 'Polygon' ? [space.geometry.rings] : space.geometry.polygons;
+                return ringGroups.map((rg, pi) => (
+                  <Line key={`ov-sp-${li}-${item.spaceId}-${pi}`} points={flattenRings(rg)} closed
+                    fill={item.fill ?? 'transparent'} opacity={item.fillOpacity ?? 0.5}
+                    stroke={item.stroke} strokeWidth={item.strokeWidth != null ? item.strokeWidth / viewport.scale : 0}
+                    strokeOpacity={item.strokeOpacity ?? 1} listening={false} />
+                ));
+              }),
+              ...(data.markers ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                const r = (item.radius ?? 5) / viewport.scale;
+                const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const shape = item.shape ?? 'circle';
+                return (
+                  <Group key={`ov-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {shape === 'circle' ? (
+                      <Circle x={pt.x} y={pt.y} radius={r}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : shape === 'rect' ? (
+                      <Rect x={pt.x - w / 2} y={pt.y - h / 2} width={w} height={h}
+                        rotation={item.rotation ?? 0}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : (
+                      <Rect x={pt.x} y={pt.y} width={w} height={h}
+                        rotation={(item.rotation ?? 0) + 45}
+                        offsetX={w / 2} offsetY={h / 2}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    )}
+                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
+                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
+                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                  </Group>
+                );
+              }),
+              ...(data.annotations ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                return (
+                  <Text key={`ov-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
+                    text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
+                    fontSize={(item.fontSize ?? 10) / viewport.scale} listening={false} />
+                );
+              }),
+              ...(data.custom ?? []).map((item) => {
+                const pt = resolveLayerPosition(item.position, model);
+                return (
+                  <Group key={`ov-cu-${li}-${item.id}`}
+                    onClick={() => item.onClick?.()}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {item.render(pt, viewport.scale)}
+                  </Group>
+                );
+              }),
+            ])}
           </Group>
         </Layer>
       </Stage>
-      {hoveredAsset ? (
+      {activeTooltip ? (
         <Stage
           width={stageWidth}
           height={stageHeight}
@@ -1259,17 +1430,22 @@ export function BuildingMap({
         >
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: '#64748b', textTransform: 'uppercase', marginBottom: 2 }}>Layers</span>
           {([
-            { key: 'floorPlan', label: 'Floor Plan', color: '#1d1c1a' },
-            { key: 'roomMetrics', label: 'Room Metrics', color: '#1e40af' },
-            { key: 'sensors', label: 'Sensors', color: '#0b3b6f' },
-            { key: 'hvac', label: 'HVAC', color: '#7c2d12' },
-          ] as { key: keyof LayerVisibility; label: string; color: string }[]).map(({ key, label, color }) => {
-            const active = layers[key];
+            { id: 'floorPlan', label: 'Floor Plan', color: '#1d1c1a', status: undefined as string | undefined },
+            ...(layerDefinitions ?? []).map((def) => ({
+              id: def.id,
+              label: def.label,
+              color: def.color ?? '#475569',
+              status: layerStatuses[def.id]?.status as string | undefined,
+            })),
+          ]).map(({ id, label, color, status }) => {
+            const active = id === 'floorPlan'
+              ? (visibleLayers?.floorPlan ?? true)
+              : (visibleLayers?.[id] ?? false);
             return (
               <button
-                key={key}
+                key={id}
                 type="button"
-                onClick={() => onLayerToggle(key)}
+                onClick={() => onLayerToggle(id)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1298,6 +1474,7 @@ export function BuildingMap({
                   }}
                 />
                 {label}
+                {status === 'loading' ? ' …' : status === 'error' ? ' !' : ''}
               </button>
             );
           })}

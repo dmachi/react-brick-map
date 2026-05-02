@@ -9,9 +9,9 @@ import {
   loadBrickRecFromJsonLd,
   loadBrickRecFromTurtle,
 } from './lib';
-import type { BrickRecSource } from './lib';
-import type { LayerVisibility } from './lib';
-import { DEFAULT_LAYER_VISIBILITY } from './lib';
+import type { BrickRecSource, LayerDefinition } from './lib';
+import { isSensorAsset, isHvacAsset } from './lib/assetClassifiers';
+import { computeSpaceMetrics, centroidOfRing, getPrimaryRing } from './lib/geometryUtils';
 import {
   geometryProfiles,
   sampleBrickRecSource,
@@ -31,11 +31,99 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [turtleUrl, setTurtleUrl] = useState('https://brickschema.org/ttl/mortar/bldg1.ttl');
   const [mapSize, setMapSize] = useState({ width: 960, height: 560 });
-  const [visibleLayers, setVisibleLayers] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
+  const [visibleLayers, setVisibleLayers] = useState<Record<string, boolean>>({
+    floorPlan: true,
+    sensors: true,
+    hvac: true,
+    roomMetrics: false,
+  });
+
+  const layerDefinitions = useMemo<LayerDefinition[]>(() => [
+    {
+      type: 'data',
+      id: 'sensors',
+      label: 'Sensors',
+      color: '#0b3b6f',
+      renderOrder: 'overlay',
+      getData: ({ model }) => ({
+        markers: model.assets
+          .filter(isSensorAsset)
+          .map((asset) => ({
+            id: asset.id,
+            position: asset.position ?? { x: 0, y: 0 },
+            fill: '#1e3a5f',
+            stroke: '#38bdf8',
+            radius: 4,
+            icon: '⚡',
+            iconColor: '#bae6fd',
+            label: asset.label,
+            tooltip: [
+              asset.label,
+              asset.brickClass ? asset.brickClass.split('/').pop()?.replace(/_/g, ' ') ?? '' : '',
+            ].filter(Boolean).join('\n'),
+          }))
+          .filter((m) => m.position.x !== 0 || m.position.y !== 0),
+      }),
+    },
+    {
+      type: 'data',
+      id: 'hvac',
+      label: 'HVAC',
+      color: '#7c2d12',
+      renderOrder: 'overlay',
+      getData: ({ model }) => ({
+        markers: model.assets
+          .filter(isHvacAsset)
+          .map((asset) => ({
+            id: asset.id,
+            position: asset.position ?? { x: 0, y: 0 },
+            fill: '#431407',
+            stroke: '#fb923c',
+            radius: 5,
+            icon: '⬡',
+            iconColor: '#fed7aa',
+            label: asset.label,
+            tooltip: [
+              asset.label,
+              asset.brickClass ? asset.brickClass.split('/').pop()?.replace(/_/g, ' ') ?? '' : '',
+            ].filter(Boolean).join('\n'),
+          }))
+          .filter((m) => m.position.x !== 0 || m.position.y !== 0),
+      }),
+    },
+    {
+      type: 'data',
+      id: 'roomMetrics',
+      label: 'Room Metrics',
+      color: '#1e40af',
+      renderOrder: 'overlay',
+      getData: ({ model }) => ({
+        annotations: model.spaces.flatMap((space) => {
+          const { area, width, height: spaceH } = computeSpaceMetrics(space);
+          if (area < 0.01) return [];
+          const ring = getPrimaryRing(space);
+          const centroid = centroidOfRing(ring);
+          const lines = [
+            `${width.toFixed(1)} × ${spaceH.toFixed(1)}`,
+            `${area.toFixed(1)} m²`,
+          ];
+          const volumeRaw = space.metadata?.volume;
+          if (typeof volumeRaw === 'number') lines.push(`${volumeRaw.toFixed(1)} m³`);
+          return lines.map((text, i) => ({
+            id: `${space.id}-metric-${i}`,
+            position: { x: centroid.x, y: centroid.y + (i + 1) * 11 },
+            text,
+            color: '#1e40af',
+            fontSize: 9,
+          }));
+        }),
+      }),
+    },
+  ], []);
   const mapPanelRef = useRef<HTMLElement | null>(null);
 
-  const toggleLayer = (key: keyof LayerVisibility) =>
-    setVisibleLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  const toggleLayer = (id: string) =>
+    setVisibleLayers((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const profile = useMemo(
     () => parseGeometryProfile(geometryProfiles[selectedProfileKey]),
@@ -242,6 +330,7 @@ function App() {
             northDirectionDegrees={profile.northDirectionDegrees}
             selectedSpaceId={selectedSpaceId}
             resetToken={resetToken}
+            layers={layerDefinitions}
             visibleLayers={visibleLayers}
             onLayerToggle={toggleLayer}
             onViewportChange={(viewport) => {
@@ -263,6 +352,7 @@ function App() {
             northDirectionDegrees={profile.northDirectionDegrees}
             selectedSpaceId={selectedSpaceId}
             resetToken={resetToken}
+            layers={layerDefinitions}
             visibleLayers={visibleLayers}
             onLayerToggle={toggleLayer}
             onViewportChange={(viewport) => {

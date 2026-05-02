@@ -2,6 +2,7 @@ import type {
   AnnotationEntity,
   AssetEntity,
   CanonicalBuildingMapModel,
+  LayerPosition,
   Ring,
   SpaceEntity,
   XY,
@@ -340,4 +341,33 @@ export function findAnchorForAnnotation(annotation: AnnotationEntity, model: Can
   }
 
   return { x: 0, y: 0 };
+}
+
+/**
+ * Resolve a `LayerPosition` to absolute plan-coordinate XY.
+ *
+ * - If `pos` contains a `spaceId`, the position is treated as an offset from
+ *   the space's bounding-box min-corner (minX, minY) using the plan coordinate
+ *   system. The `z` component is stored on `SpaceRelativePosition` but is not
+ *   returned here — callers that need it (e.g. OrthoBuilding for wall-height
+ *   projection) should read `pos.z` directly.
+ * - If the referenced space is not found, `x` and `y` are returned as-is
+ *   (treated as absolute plan coordinates).
+ * - Plain `XY` positions are returned unchanged.
+ */
+export function resolveLayerPosition(
+  pos: LayerPosition,
+  model: CanonicalBuildingMapModel,
+): XY {
+  if ('spaceId' in pos) {
+    const space = model.spaces.find((s) => s.id === pos.spaceId);
+    if (space) {
+      const ring = getPrimaryRing(space);
+      const bbox = computeBoundingBox(ring);
+      return { x: bbox.minX + pos.x, y: bbox.minY + pos.y };
+    }
+    // Space not found — treat x/y as absolute fallback.
+    return { x: pos.x, y: pos.y };
+  }
+  return { x: pos.x, y: pos.y };
 }

@@ -51,16 +51,28 @@ export type {
   RdfStore,
 } from './rdfStore';
 
-export { DEFAULT_LAYER_VISIBILITY } from './types';
+
 export type {
   AnnotationEntity,
+  AnnotationLayerItem,
   AssetEntity,
   CanonicalBuildingMapModel,
-  LayerVisibility,
+  CustomLayerItem,
+  DataLayerDefinition,
   Diagnostic,
   FloorEntity,
   Geometry,
   Id,
+  LayerData,
+  LayerDefinition,
+  LayerPosition,
+  LayerQueryContext,
+  LayerRenderOrder,
+  MarkerLayerItem,
   SpaceEntity,
+  SpaceLayerItem,
+  SpaceRelativePosition,
+  SparqlFnLayerDefinition,
+  SparqlLayerDefinition,
   XY,
 } from './types';

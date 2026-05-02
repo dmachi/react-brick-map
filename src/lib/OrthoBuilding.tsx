@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
-import type { AssetEntity, LayerVisibility, XY } from './types';
-import { DEFAULT_LAYER_VISIBILITY } from './types';
-import { createRdfStore } from './rdfStore';
+import type { AssetEntity, LayerData, LayerDefinition, LayerQueryContext, XY } from './types';
+import { createRdfStore, selectRdfStore } from './rdfStore';
 import type { BuildingMapProps } from './BuildingMap';
 import {
   formatBrickTypeLabel,
@@ -13,19 +12,16 @@ import {
 import {
   isDoorAsset,
   isFloorPlanAsset,
-  isHvacAsset,
-  isPlenumSpace,
-  isSensorAsset,
   isWindowAsset,
 } from './assetClassifiers';
 import {
   buildAssetTooltip,
   centroidOfRing,
-  computeSpaceMetrics,
   findAnchorForAnnotation,
   flattenRing,
   getPrimaryRing,
   makeGradientStops,
+  resolveLayerPosition,
 } from './geometryUtils';
 import {
   buildExtrudedWallQuads,
@@ -35,6 +31,11 @@ import {
   projectPlanPointFromCenter,
   projectRingTopFace,
 } from './orthoProjection';
+
+type LayerStatus =
+  | { status: 'loading' }
+  | { status: 'loaded'; data: LayerData }
+  | { status: 'error'; error: string };
 
 export type OrthoBuildingProps = BuildingMapProps;
 
@@ -120,13 +121,14 @@ export function OrthoBuilding({
   onViewportChange,
   onSpaceClick,
   onAssetClick,
+  layers: layerDefinitions,
   visibleLayers,
   onLayerToggle,
   theme,
   themeOverrides,
   showControls = false,
 }: OrthoBuildingProps) {
-  const layers: LayerVisibility = { ...DEFAULT_LAYER_VISIBILITY, ...visibleLayers };
+  const floorPlanVisible = visibleLayers?.floorPlan ?? true;
   const activeRdfStore = useMemo(() => rdfStore ?? createRdfStore(), [rdfStore]);
   const graphStatementCount = activeRdfStore.statements.length;
   const [isExpanded, setIsExpanded] = useState(false);
@@ -139,6 +141,8 @@ export function OrthoBuilding({
 
   const [hoveredSpaceId, setHoveredSpaceId] = useState<string | null>(null);
   const [hoveredAsset, setHoveredAsset] = useState<{ asset: AssetEntity; x: number; y: number } | null>(null);
+  const [hoveredMarker, setHoveredMarker] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [layerStatuses, setLayerStatuses] = useState<Record<string, LayerStatus>>({});
   const viewportChangeRef = useRef(onViewportChange);
   const resolvedTheme = useMemo(
     () => resolveTheme(theme, themeOverrides),
@@ -148,6 +152,73 @@ export function OrthoBuilding({
   useEffect(() => {
     viewportChangeRef.current = onViewportChange;
   }, [onViewportChange]);
+
+  // Invalidate layer cache when the RDF store changes.
+  useEffect(() => {
+    setLayerStatuses({});
+  }, [graphStatementCount]);
+
+  // Fetch data for visible external layers that have no cached result.
+  useEffect(() => {
+    if (!layerDefinitions || layerDefinitions.length === 0) return;
+    const ctx: LayerQueryContext = { model, rdfStore: activeRdfStore };
+    const toFetch = layerDefinitions.filter((def) => {
+      const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
+      return isVisible && !layerStatuses[def.id];
+    });
+    if (toFetch.length === 0) return;
+    setLayerStatuses((prev) => {
+      const next = { ...prev };
+      for (const def of toFetch) next[def.id] = { status: 'loading' };
+      return next;
+    });
+    let cancelled = false;
+    for (const def of toFetch) {
+      const id = def.id;
+      const doFetch = async () => {
+        try {
+          let data: LayerData;
+          if (def.type === 'sparql') {
+            const rows = await selectRdfStore(activeRdfStore, def.query);
+            if (cancelled) return;
+            data = def.mapResults(rows, ctx);
+          } else if (def.type === 'sparql-fn') {
+            const rows = await selectRdfStore(activeRdfStore, def.getQuery(ctx));
+            if (cancelled) return;
+            data = def.mapResults(rows, ctx);
+          } else {
+            data = await Promise.resolve(def.getData(ctx));
+            if (cancelled) return;
+          }
+          setLayerStatuses((prev) => ({ ...prev, [id]: { status: 'loaded', data } }));
+        } catch (err) {
+          if (cancelled) return;
+          const error = err instanceof Error ? err.message : 'Layer load failed';
+          setLayerStatuses((prev) => ({ ...prev, [id]: { status: 'error', error } }));
+        }
+      };
+      void doFetch();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [layerDefinitions, visibleLayers, layerStatuses, graphStatementCount, model, activeRdfStore]);
+
+  const { floorLayerData, wallsLayerData, overlayLayerData } = useMemo(() => {
+    const floor: LayerData[] = [];
+    const walls: LayerData[] = [];
+    const overlay: LayerData[] = [];
+    if (!layerDefinitions || layerDefinitions.length === 0) return { floorLayerData: floor, wallsLayerData: walls, overlayLayerData: overlay };
+    for (const def of layerDefinitions) {
+      const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
+      if (!isVisible) continue;
+      const s = layerStatuses[def.id];
+      if (s?.status !== 'loaded') continue;
+      const bucket = def.renderOrder === 'floor' ? floor : def.renderOrder === 'walls' ? walls : overlay;
+      bucket.push(s.data);
+    }
+    return { floorLayerData: floor, wallsLayerData: walls, overlayLayerData: overlay };
+  }, [layerDefinitions, visibleLayers, layerStatuses]);
 
   useEffect(() => {
     if (!isExpanded) {
@@ -277,23 +348,27 @@ export function OrthoBuilding({
   const stageWidth = Math.max(mapWidth, Math.round(mapWidth * overflowScale));
   const stageHeight = Math.max(mapHeight, Math.round(mapHeight * overflowScale));
 
-  const tooltipText = hoveredAsset ? buildAssetTooltip(hoveredAsset.asset) : '';
+  const activeTooltip = hoveredMarker ?? (hoveredAsset ? {
+    text: buildAssetTooltip(hoveredAsset.asset),
+    x: hoveredAsset.x,
+    y: hoveredAsset.y,
+  } : null);
+  const tooltipText = activeTooltip?.text ?? '';
   const tooltipLines = tooltipText ? tooltipText.split('\n') : [];
   const tooltipWidth = Math.max(
     120,
     ...tooltipLines.map((line) => Math.round(line.length * 6.5 + 12)),
   );
   const tooltipHeight = Math.max(24, tooltipLines.length * 14 + 10);
-  const tooltipX = hoveredAsset
-    ? Math.min(Math.max(8, hoveredAsset.x + 12), Math.max(8, stageWidth - tooltipWidth - 8))
+  const tooltipX = activeTooltip
+    ? Math.min(Math.max(8, activeTooltip.x + 12), Math.max(8, stageWidth - tooltipWidth - 8))
     : 0;
-  const tooltipY = hoveredAsset
-    ? Math.min(Math.max(8, hoveredAsset.y + 12), Math.max(8, stageHeight - tooltipHeight - 8))
+  const tooltipY = activeTooltip
+    ? Math.min(Math.max(8, activeTooltip.y + 12), Math.max(8, stageHeight - tooltipHeight - 8))
     : 0;
 
   const projectedSpaces = useMemo(() => {
     return model.spaces
-      .filter((space) => !isPlenumSpace(space))
       .map((space) => {
         const ring = getPrimaryRing(space);
         if (ring.length < 3) {
@@ -349,36 +424,6 @@ export function OrthoBuilding({
       .filter((value): value is NonNullable<typeof value> => value !== null)
       .sort((left, right) => left.depthScore - right.depthScore);
   }, [hoveredSpaceId, model.spaces, projectionContext, resolvedTheme, selectedSpaceId]);
-
-  const projectedPlenumSpaces = useMemo(() => {
-    return model.spaces
-      .filter(isPlenumSpace)
-      .map((space) => {
-        const ring = getPrimaryRing(space);
-        if (ring.length < 3) {
-          return null;
-        }
-
-        const topRing = projectRingTopFace(ring, DEFAULT_ORTHO_DEPTH, undefined, projectionContext);
-        const walls = buildExtrudedWallQuads(ring, DEFAULT_ORTHO_DEPTH, undefined, projectionContext);
-        const centroid = centroidOfRing(ring);
-        const depthScore = Math.hypot(
-          centroid.x - projectionContext.center.x,
-          centroid.y - projectionContext.center.y,
-        );
-
-        return {
-          space,
-          ring,
-          topRing,
-          walls,
-          centroid,
-          depthScore,
-        };
-      })
-      .filter((value): value is NonNullable<typeof value> => value !== null)
-      .sort((left, right) => left.depthScore - right.depthScore);
-  }, [model.spaces, projectionContext]);
 
   return (
     <div
@@ -487,35 +532,103 @@ export function OrthoBuilding({
               />
             ) : null}
 
-            {layers.floorPlan && (() => {
+            {/* Pass 1: floor fills — back to front */}
+            {floorPlanVisible && projectedSpaces.map((entry) => (
+              <Line
+                key={`floor-${entry.space.id}`}
+                points={flattenRing(entry.ring)}
+                closed
+                fillLinearGradientStartPoint={{ x: entry.bbox.minX, y: entry.bbox.minY }}
+                fillLinearGradientEndPoint={{ x: entry.bbox.maxX, y: entry.bbox.maxY }}
+                fillLinearGradientColorStops={makeGradientStops(entry.floorFill)}
+                stroke={entry.style.stroke}
+                strokeWidth={1 / viewport.scale}
+                shadowColor="rgba(0,0,0,0.16)"
+                shadowBlur={8 / viewport.scale}
+                shadowOffsetX={2 / viewport.scale}
+                shadowOffsetY={2 / viewport.scale}
+                shadowOpacity={1}
+                onMouseEnter={() => setHoveredSpaceId(entry.space.id)}
+                onMouseLeave={() => setHoveredSpaceId(null)}
+                onClick={() => onSpaceClick?.(entry.space)}
+              />
+            ))}
+
+            {/* renderOrder='floor': on the floor surface, after fills, before wall geometry.
+                Space overlays use plan-coordinate rings so walls extrude in front of them.
+                Markers and annotations are projected to ortho coordinates. */}
+            {floorLayerData.map((data, li) => [
+              ...(data.spaces ?? []).flatMap((item) => {
+                const space = model.spaces.find((s) => s.id === item.spaceId);
+                if (!space) return [];
+                const ring = getPrimaryRing(space);
+                return [(
+                  <Line key={`fl-sp-${li}-${item.spaceId}`} points={flattenRing(ring)} closed
+                    fill={item.fill ?? 'transparent'} opacity={item.fillOpacity ?? 0.5}
+                    stroke={item.stroke} strokeWidth={item.strokeWidth != null ? item.strokeWidth / viewport.scale : 0}
+                    strokeOpacity={item.strokeOpacity ?? 1} listening={false} />
+                )];
+              }),
+              ...(data.markers ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const r = (item.radius ?? 5) / viewport.scale;
+                const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const shape = item.shape ?? 'circle';
+                return (
+                  <Group key={`fl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {shape === 'circle' ? (
+                      <Circle x={pt.x} y={pt.y} radius={r}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : shape === 'rect' ? (
+                      <Rect x={pt.x - w / 2} y={pt.y - h / 2} width={w} height={h}
+                        rotation={item.rotation ?? 0}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : (
+                      <Rect x={pt.x} y={pt.y} width={w} height={h}
+                        rotation={(item.rotation ?? 0) + 45}
+                        offsetX={w / 2} offsetY={h / 2}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    )}
+                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
+                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
+                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                  </Group>
+                );
+              }),
+              ...(data.annotations ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                return (
+                  <Text key={`fl-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
+                    text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
+                    fontSize={(item.fontSize ?? 10) / viewport.scale} listening={false} />
+                );
+              }),
+              ...(data.custom ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                return (
+                  <Group key={`fl-cu-${li}-${item.id}`}
+                    onClick={() => item.onClick?.()}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {item.render(pt, viewport.scale)}
+                  </Group>
+                );
+              }),
+            ])}
+
+            {/* Passes 2–5: wall faces, edge lines, wall caps */}
+            {floorPlanVisible && (() => {
               const wallStroke = '#4b5563';
               const wallCap = '#d8dde3';
               const wallCapThickness = 0.22;
               return (
                 <>
-                  {/* Pass 1: all floor fills — back to front */}
-                  {projectedSpaces.map((entry) => (
-                    <Line
-                      key={`floor-${entry.space.id}`}
-                      points={flattenRing(entry.ring)}
-                      closed
-                      fillLinearGradientStartPoint={{ x: entry.bbox.minX, y: entry.bbox.minY }}
-                      fillLinearGradientEndPoint={{ x: entry.bbox.maxX, y: entry.bbox.maxY }}
-                      fillLinearGradientColorStops={makeGradientStops(entry.floorFill)}
-                      stroke={entry.style.stroke}
-                      strokeWidth={1 / viewport.scale}
-                      shadowColor="rgba(0,0,0,0.16)"
-                      shadowBlur={8 / viewport.scale}
-                      shadowOffsetX={2 / viewport.scale}
-                      shadowOffsetY={2 / viewport.scale}
-                      shadowOpacity={1}
-                      onMouseEnter={() => setHoveredSpaceId(entry.space.id)}
-                      onMouseLeave={() => setHoveredSpaceId(null)}
-                      onClick={() => onSpaceClick?.(entry.space)}
-                    />
-                  ))}
-
-                  {/* Pass 2: all wall faces — back to front, within each space walls are already depth-sorted */}
+                  {/* Pass 2: all wall faces */}
                   {projectedSpaces.map((entry) =>
                     entry.walls.map((wall) => (
                       <Line
@@ -572,7 +685,7 @@ export function OrthoBuilding({
                     ))
                   )}
 
-                  {/* Pass 5: top edge lines + wall caps — drawn last so they always appear above all floor fills */}
+                  {/* Pass 5: top edge lines + wall caps */}
                   {projectedSpaces.map((entry) =>
                     entry.walls.map((wall) => (
                       <Group key={`wall-top-cap-${entry.space.id}-${wall.id}`} listening={false}>
@@ -594,133 +707,103 @@ export function OrthoBuilding({
                       </Group>
                     ))
                   )}
-
-                  {/* Pass 6: labels */}
-                  {projectedSpaces.map((entry) => (
-                    <Group key={`label-${entry.space.id}`} listening={false}>
-                      {entry.typeLabel ? (
-                        <Text
-                          x={entry.centroid.x}
-                          y={entry.centroid.y - 9 / viewport.scale}
-                          text={entry.typeLabel}
-                          fontSize={8 / viewport.scale}
-                          fill={entry.style.iconColor ?? entry.style.labelColor}
-                          offsetX={(entry.typeLabel.length * 2.2) / viewport.scale}
-                          offsetY={3 / viewport.scale}
-                        />
-                      ) : null}
-                      <Text
-                        x={entry.centroid.x}
-                        y={entry.centroid.y}
-                        text={entry.space.label}
-                        fontSize={12 / viewport.scale}
-                        fill={entry.style.labelColor}
-                        offsetX={(entry.space.label.length * 3) / viewport.scale}
-                        offsetY={6 / viewport.scale}
-                      />
-                    </Group>
-                  ))}
                 </>
               );
             })()}
 
-            {layers.hvac && projectedPlenumSpaces.map((entry) => (
-              <Group key={`plenum-${entry.space.id}`}>
-                {entry.walls.map((wall) => (
-                  <Line
-                    key={`plenum-wall-${entry.space.id}-${wall.id}`}
-                    points={flattenQuad([wall.a, wall.b, wall.topB, wall.topA])}
-                    closed
-                    fill="#7dd3fc"
-                    opacity={wall.visible ? 0.28 : 0.16}
-                    stroke="#0284c7"
-                    strokeWidth={1.2 / viewport.scale}
-                  />
-                ))}
-                {entry.walls.map((wall) => (
-                  <Line
-                    key={`plenum-wall-base-${entry.space.id}-${wall.id}`}
-                    points={flattenQuad([wall.a, wall.b])}
-                    stroke="#0369a1"
-                    strokeWidth={0.9 / viewport.scale}
-                    lineCap="round"
-                    opacity={wall.visible ? 0.9 : 0.4}
-                    listening={false}
-                  />
-                ))}
-                <Line
-                  points={flattenRing(entry.ring)}
-                  closed
-                  fill="#e0f2fe"
-                  stroke="#0284c7"
-                  strokeWidth={2 / viewport.scale}
-                  dash={[1.5 / viewport.scale, 0.8 / viewport.scale]}
-                  onMouseEnter={() => setHoveredSpaceId(entry.space.id)}
-                  onMouseLeave={() => setHoveredSpaceId(null)}
-                  onClick={() => onSpaceClick?.(entry.space)}
-                />
-                {entry.walls.map((wall) => (
-                  <Group
-                    key={`plenum-wall-vertical-${entry.space.id}-${wall.id}`}
-                    listening={false}
-                    opacity={wall.visible ? 0.9 : 0.4}
-                  >
-                    <Line
-                      points={flattenQuad([wall.a, wall.topA])}
-                      stroke="#0369a1"
-                      strokeWidth={0.65 / viewport.scale}
-                      lineCap="round"
-                    />
-                    <Line
-                      points={flattenQuad([wall.b, wall.topB])}
-                      stroke="#0369a1"
-                      strokeWidth={0.65 / viewport.scale}
-                      lineCap="round"
-                    />
+            {/* renderOrder='walls': after wall caps, before labels.
+                Space overlays use the projected top-face ring so they sit on the wall-top plane.
+                Suitable for wall-mounted indicators, zone boundaries, etc. */}
+            {wallsLayerData.map((data, li) => [
+              ...(data.spaces ?? []).flatMap((item) => {
+                const entry = projectedSpaces.find((e) => e.space.id === item.spaceId);
+                if (!entry) return [];
+                return [(
+                  <Line key={`wl-sp-${li}-${item.spaceId}`} points={flattenRing(entry.topRing)} closed
+                    fill={item.fill ?? 'transparent'} opacity={item.fillOpacity ?? 0.5}
+                    stroke={item.stroke} strokeWidth={item.strokeWidth != null ? item.strokeWidth / viewport.scale : 0}
+                    strokeOpacity={item.strokeOpacity ?? 1} listening={false} />
+                )];
+              }),
+              ...(data.markers ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const r = (item.radius ?? 5) / viewport.scale;
+                const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const shape = item.shape ?? 'circle';
+                return (
+                  <Group key={`wl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {shape === 'circle' ? (
+                      <Circle x={pt.x} y={pt.y} radius={r}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : shape === 'rect' ? (
+                      <Rect x={pt.x - w / 2} y={pt.y - h / 2} width={w} height={h}
+                        rotation={item.rotation ?? 0}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : (
+                      <Rect x={pt.x} y={pt.y} width={w} height={h}
+                        rotation={(item.rotation ?? 0) + 45}
+                        offsetX={w / 2} offsetY={h / 2}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    )}
+                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
+                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
+                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
                   </Group>
-                ))}
-                {entry.walls.map((wall) => (
-                  <Line
-                    key={`plenum-wall-top-${entry.space.id}-${wall.id}`}
-                    points={flattenQuad([wall.topA, wall.topB])}
-                    stroke="#0369a1"
-                    strokeWidth={0.85 / viewport.scale}
-                    lineCap="round"
-                    opacity={wall.visible ? 0.9 : 0.45}
-                    listening={false}
+                );
+              }),
+              ...(data.annotations ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                return (
+                  <Text key={`wl-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
+                    text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
+                    fontSize={(item.fontSize ?? 10) / viewport.scale} listening={false} />
+                );
+              }),
+              ...(data.custom ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                return (
+                  <Group key={`wl-cu-${li}-${item.id}`}
+                    onClick={() => item.onClick?.()}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {item.render(pt, viewport.scale)}
+                  </Group>
+                );
+              }),
+            ])}
+
+            {/* Pass 6: labels */}
+            {floorPlanVisible && projectedSpaces.map((entry) => (
+              <Group key={`label-${entry.space.id}`} listening={false}>
+                {entry.typeLabel ? (
+                  <Text
+                    x={entry.centroid.x}
+                    y={entry.centroid.y - 9 / viewport.scale}
+                    text={entry.typeLabel}
+                    fontSize={8 / viewport.scale}
+                    fill={entry.style.iconColor ?? entry.style.labelColor}
+                    offsetX={(entry.typeLabel.length * 2.2) / viewport.scale}
+                    offsetY={3 / viewport.scale}
                   />
-                ))}
-                {entry.walls.map((wall) => (
-                  <Line
-                    key={`plenum-wall-cap-${entry.space.id}-${wall.id}`}
-                    points={flattenQuad(buildWallCapQuad(wall.topA, wall.topB, entry.centroid, 0.18))}
-                    closed
-                    fill="#bae6fd"
-                    stroke="#0284c7"
-                    strokeWidth={0.55 / viewport.scale}
-                    opacity={wall.visible ? 0.9 : 0.42}
-                    listening={false}
-                  />
-                ))}
+                ) : null}
                 <Text
                   x={entry.centroid.x}
                   y={entry.centroid.y}
                   text={entry.space.label}
-                  fontSize={14 / viewport.scale}
-                  fill="#0ea5e9"
-                  opacity={0.6}
-                  offsetX={(entry.space.label.length * 3.5) / viewport.scale}
-                  offsetY={7 / viewport.scale}
+                  fontSize={12 / viewport.scale}
+                  fill={entry.style.labelColor}
+                  offsetX={(entry.space.label.length * 3) / viewport.scale}
+                  offsetY={6 / viewport.scale}
                 />
               </Group>
             ))}
 
-            {model.assets.filter((asset) => {
-              if (isFloorPlanAsset(asset)) return layers.floorPlan;
-              if (isSensorAsset(asset)) return layers.sensors;
-              if (isHvacAsset(asset)) return layers.hvac;
-              return layers.floorPlan;
-            }).map((asset) => {
+            {floorPlanVisible && model.assets.filter(isFloorPlanAsset).map((asset) => {
               const assetStyle = resolveAssetStyle(resolvedTheme, asset);
               const iconPoint = projectPlanPointFromCenter(asset.position, projectionContext);
               const doorAsset = isDoorAsset(asset);
@@ -787,18 +870,7 @@ export function OrthoBuilding({
               );
             })}
 
-            {model.annotations.filter((annotation) => {
-              if (annotation.targetType === 'asset') {
-                const asset = model.assets.find((a) => a.id === annotation.targetId);
-                if (asset) {
-                  if (isFloorPlanAsset(asset)) return layers.floorPlan;
-                  if (isSensorAsset(asset)) return layers.sensors;
-                  if (isHvacAsset(asset)) return layers.hvac;
-                }
-              }
-              if (annotation.targetType === 'space') return layers.floorPlan;
-              return layers.floorPlan;
-            }).map((annotation) => {
+            {floorPlanVisible && model.annotations.map((annotation) => {
               const anchor = findAnchorForAnnotation(annotation, model);
               const orthoAnchor = projectPlanPointFromCenter(anchor, projectionContext);
               return (
@@ -813,56 +885,75 @@ export function OrthoBuilding({
               );
             })}
 
-            {layers.roomMetrics && model.spaces.map((space) => {
-              const { area, width, height: spaceHeight } = computeSpaceMetrics(space);
-              if (area < 0.01) return null;
-              const ring = getPrimaryRing(space);
-              const centroid = projectPlanPointFromCenter(centroidOfRing(ring), projectionContext);
-              const areaStr = area.toFixed(1);
-              const dimsStr = `${width.toFixed(1)} × ${spaceHeight.toFixed(1)}`;
-              const volumeRaw = space.metadata?.volume;
-              const volumeStr = typeof volumeRaw === 'number' ? `${volumeRaw.toFixed(1)} m\u00b3` : null;
-              const fontSize = 9 / viewport.scale;
-              const lineGap = 11 / viewport.scale;
-              return (
-                <Group key={`metrics-${space.id}`}>
-                  <Text
-                    x={centroid.x}
-                    y={centroid.y + lineGap}
-                    text={dimsStr}
-                    fontSize={fontSize}
-                    fill="#1e40af"
-                    offsetX={(dimsStr.length * 2.6) / viewport.scale}
-                    offsetY={fontSize / 2}
-                  />
-                  <Text
-                    x={centroid.x}
-                    y={centroid.y + lineGap * 2}
-                    text={`${areaStr}\u00b2`}
-                    fontSize={fontSize}
-                    fill="#1e40af"
-                    offsetX={(`${areaStr}\u00b2`.length * 2.6) / viewport.scale}
-                    offsetY={fontSize / 2}
-                  />
-                  {volumeStr ? (
-                    <Text
-                      x={centroid.x}
-                      y={centroid.y + lineGap * 3}
-                      text={volumeStr}
-                      fontSize={fontSize}
-                      fill="#1e40af"
-                      offsetX={(volumeStr.length * 2.6) / viewport.scale}
-                      offsetY={fontSize / 2}
-                    />
-                  ) : null}
-                </Group>
-              );
-            })}
+            {/* renderOrder='overlay': after all geometry, labels, assets and annotations.
+                Space overlays use the projected top-face ring. */}
+            {overlayLayerData.map((data, li) => [
+              ...(data.spaces ?? []).flatMap((item) => {
+                const entry = projectedSpaces.find((e) => e.space.id === item.spaceId);
+                if (!entry) return [];
+                return [(
+                  <Line key={`ov-sp-${li}-${item.spaceId}`} points={flattenRing(entry.topRing)} closed
+                    fill={item.fill ?? 'transparent'} opacity={item.fillOpacity ?? 0.5}
+                    stroke={item.stroke} strokeWidth={item.strokeWidth != null ? item.strokeWidth / viewport.scale : 0}
+                    strokeOpacity={item.strokeOpacity ?? 1} listening={false} />
+                )];
+              }),
+              ...(data.markers ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const r = (item.radius ?? 5) / viewport.scale;
+                const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
+                const shape = item.shape ?? 'circle';
+                return (
+                  <Group key={`ov-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {shape === 'circle' ? (
+                      <Circle x={pt.x} y={pt.y} radius={r}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : shape === 'rect' ? (
+                      <Rect x={pt.x - w / 2} y={pt.y - h / 2} width={w} height={h}
+                        rotation={item.rotation ?? 0}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    ) : (
+                      <Rect x={pt.x} y={pt.y} width={w} height={h}
+                        rotation={(item.rotation ?? 0) + 45}
+                        offsetX={w / 2} offsetY={h / 2}
+                        fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
+                    )}
+                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
+                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
+                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                  </Group>
+                );
+              }),
+              ...(data.annotations ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                return (
+                  <Text key={`ov-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
+                    text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
+                    fontSize={(item.fontSize ?? 10) / viewport.scale} listening={false} />
+                );
+              }),
+              ...(data.custom ?? []).map((item) => {
+                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                return (
+                  <Group key={`ov-cu-${li}-${item.id}`}
+                    onClick={() => item.onClick?.()}
+                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseLeave={() => setHoveredMarker(null)}>
+                    {item.render(pt, viewport.scale)}
+                  </Group>
+                );
+              }),
+            ])}
           </Group>
         </Layer>
       </Stage>
 
-      {hoveredAsset ? (
+      {activeTooltip ? (
         <Stage
           width={stageWidth}
           height={stageHeight}
@@ -944,17 +1035,20 @@ export function OrthoBuilding({
             Layers
           </span>
           {([
-            { key: 'floorPlan', label: 'Floor Plan', color: '#1d1c1a' },
-            { key: 'roomMetrics', label: 'Room Metrics', color: '#1e40af' },
-            { key: 'sensors', label: 'Sensors', color: '#0b3b6f' },
-            { key: 'hvac', label: 'HVAC', color: '#7c2d12' },
-          ] as { key: keyof LayerVisibility; label: string; color: string }[]).map(({ key, label, color }) => {
-            const active = layers[key];
+            { id: 'floorPlan', label: 'Floor Plan', color: '#1d1c1a', status: undefined as string | undefined },
+            ...(layerDefinitions ?? []).map((def) => ({
+              id: def.id,
+              label: def.label,
+              color: def.color ?? '#475569',
+              status: layerStatuses[def.id]?.status as string | undefined,
+            })),
+          ]).map(({ id, label, color, status }) => {
+            const active = id === 'floorPlan' ? (visibleLayers?.floorPlan ?? true) : (visibleLayers?.[id] ?? false);
             return (
               <button
-                key={key}
+                key={id}
                 type="button"
-                onClick={() => onLayerToggle(key)}
+                onClick={() => onLayerToggle(id)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -982,7 +1076,7 @@ export function OrthoBuilding({
                     transition: 'background 0.12s ease',
                   }}
                 />
-                {label}
+                {label}{status === 'loading' ? ' …' : status === 'error' ? ' !' : ''}
               </button>
             );
           })}
