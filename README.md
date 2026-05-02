@@ -10,7 +10,7 @@ React + Konva building-map components backed by BRICK/REC semantic data. Support
   - [Precedence](#precedence)
   - [Examples](#examples-1)
 - [External Layer API](#external-layer-api)
-  - [Layer types](#layer-types)
+  - [Layer definition](#layer-definition)
   - [Item types](#item-types)
   - [Positioning](#positioning)
   - [Examples](#examples)
@@ -19,7 +19,7 @@ React + Konva building-map components backed by BRICK/REC semantic data. Support
     - [Annotations (AnnotationLayerItem)](#annotations-annotationlayeritem)
     - [Space-relative positioning](#space-relative-positioning)
     - [Custom render callback (CustomLayerItem)](#custom-render-callback-customlayeritem)
-    - [SPARQL-driven layer](#sparql-driven-layer)
+    - [Static layer data](#static-layer-data)
     - [Data-driven layer with external fetch](#data-driven-layer-with-external-fetch)
 - [Render order](#render-order)
 - [Layer panel](#layer-panel)
@@ -162,30 +162,32 @@ Layers are defined outside the component and passed via the `layers` prop. Visib
 
 `<OrthoBuilding>` accepts the same props.
 
-### Layer types
+### Layer definition
 
-| Type | When to use |
-|---|---|
-| `'data'` | Synchronous or async data computed locally — no SPARQL needed. |
-| `'sparql'` | Static SPARQL string; component runs the query and calls `mapResults`. |
-| `'sparql-fn'` | Dynamic SPARQL built at query time; `getQuery(context)` produces the string. |
+`LayerDefinition` supports two data supply approaches:
 
-All three share the common fields:
+1. `data`: static, inline layer payload.
+2. `getData(context)`: computed or async payload.
+
+Common fields:
 
 ```ts
 {
-  type: 'data' | 'sparql' | 'sparql-fn';
   id: string;           // unique key (built-in ids are not part of external layers)
   label: string;        // shown in the layer panel
   color?: string;       // accent colour for the layer panel swatch
   defaultVisible?: boolean;
   renderOrder?: 'floor' | 'walls' | 'overlay';  // default: 'overlay'
+  data?: LayerData;
+  getData?: (context: LayerDataContext) => LayerData | Promise<LayerData>;
 }
 ```
 
+If both `data` and `getData` are provided, `getData` is used.
+
 ### Item types
 
-A layer's `getData` / `mapResults` returns a `LayerData` object:
+A layer's `data` or `getData` returns a `LayerData` object:
 
 ```ts
 type LayerData = {
@@ -212,7 +214,7 @@ type LayerPosition = AbsolutePosition | SpaceRelativePosition;
 
 `SpaceRelativePosition` is discriminated by the presence of `spaceId`. The resolver finds the space in `model.spaces`, computes its bounding-box origin, and adds the offset. If the space is not found, `x`/`y` are treated as absolute coordinates.
 
-`z` is stored and forwarded to OrthoBuilding's projection pass for wall-mounted or ceiling items; it is ignored by the 2-D `BuildingMap`.
+`z` is interpreted only by `OrthoBuilding` during projection; it is ignored by the 2-D `BuildingMap`.
 
 ---
 
@@ -224,7 +226,6 @@ Tint specific room polygons — useful for occupancy heat maps, zone highlightin
 
 ```tsx
 const occupancyLayer: LayerDefinition = {
-  type: 'data',
   id: 'occupancy',
   label: 'Occupancy',
   color: '#16a34a',
@@ -247,7 +248,6 @@ const occupancyLayer: LayerDefinition = {
 
 ```tsx
 const sensorsLayer: LayerDefinition = {
-  type: 'data',
   id: 'sensors',
   label: 'Sensors',
   color: '#0284c7',
@@ -273,7 +273,6 @@ const sensorsLayer: LayerDefinition = {
 
 // Rectangular HVAC zones
 const hvacZoneLayer: LayerDefinition = {
-  type: 'data',
   id: 'hvacZones',
   label: 'HVAC Zones',
   color: '#b45309',
@@ -299,7 +298,6 @@ const hvacZoneLayer: LayerDefinition = {
 
 // Diamond markers for alarm points
 const alarmLayer: LayerDefinition = {
-  type: 'data',
   id: 'alarms',
   label: 'Alarms',
   color: '#dc2626',
@@ -331,7 +329,6 @@ Floating text labels at arbitrary positions — useful for area metrics, zone na
 import { computeSpaceMetrics, centroidOfRing, getPrimaryRing } from './lib/geometryUtils';
 
 const roomMetricsLayer: LayerDefinition = {
-  type: 'data',
   id: 'roomMetrics',
   label: 'Room Metrics',
   color: '#1e40af',
@@ -412,7 +409,6 @@ function renderPressureGauge(projected: { x: number; y: number }, scale: number)
 }
 
 const pressureLayer: LayerDefinition = {
-  type: 'data',
   id: 'pressureSensors',
   label: 'Pressure',
   color: '#0369a1',
@@ -433,41 +429,39 @@ const pressureLayer: LayerDefinition = {
 
 ---
 
-### SPARQL-driven layer
+### Static layer data
 
-Use `type: 'sparql'` when sensor data is stored in the RDF graph and needs to be queried.
+Use `data` for fixed overlays that do not need runtime computation.
 
 ```tsx
-const co2Layer: LayerDefinition = {
-  type: 'sparql',
-  id: 'co2',
-  label: 'CO₂ Sensors',
-  color: '#4d7c0f',
+const staticCallouts: LayerDefinition = {
+  id: 'static-callouts',
+  label: 'Static Callouts',
+  color: '#1d4ed8',
   renderOrder: 'overlay',
-  query: `
-    PREFIX brick: <https://brickschema.org/schema/Brick#>
-    PREFIX ref:   <https://brickschema.org/schema/Brick/ref#>
-    SELECT ?sensor ?label ?space WHERE {
-      ?sensor a brick:CO2_Sensor ;
-              rdfs:label ?label ;
-              brick:isLocatedIn ?space .
-    }
-  `,
-  mapResults: (rows, { model }) => ({
-    markers: rows.flatMap((row) => {
-      const spaceId = row.space?.value;
-      if (!spaceId) return [];
-      return [{
-        id: row.sensor?.value ?? spaceId,
-        position: { spaceId, x: 1, y: 1 },
-        shape: 'circle' as const,
-        radius: 3,
-        fill: '#1a2e05',
-        stroke: '#84cc16',
-        tooltip: String(row.label?.value ?? 'CO₂ sensor'),
-      }];
-    }),
-  }),
+  data: {
+    markers: [
+      {
+        id: 'entry-marker',
+        position: { x: 4, y: 2 },
+        shape: 'diamond',
+        width: 1.4,
+        height: 1.4,
+        fill: '#1e3a8a',
+        stroke: '#93c5fd',
+        tooltip: 'Main entry',
+      },
+    ],
+    annotations: [
+      {
+        id: 'entry-label',
+        position: { x: 4, y: 3.2 },
+        text: 'Entry',
+        color: '#1e40af',
+        fontSize: 9,
+      },
+    ],
+  },
 };
 ```
 
@@ -475,11 +469,10 @@ const co2Layer: LayerDefinition = {
 
 ### Data-driven layer with external fetch
 
-Use `type: 'data'` with an `async getData` to pull live readings from an API and overlay them on the map.
+Use `async getData` to pull live readings from an API and overlay them on the map.
 
 ```tsx
 const liveTemperatureLayer: LayerDefinition = {
-  type: 'data',
   id: 'liveTemps',
   label: 'Live Temperatures',
   color: '#b45309',

@@ -348,26 +348,71 @@ export function findAnchorForAnnotation(annotation: AnnotationEntity, model: Can
  *
  * - If `pos` contains a `spaceId`, the position is treated as an offset from
  *   the space's bounding-box min-corner (minX, minY) using the plan coordinate
- *   system. The `z` component is stored on `SpaceRelativePosition` but is not
+ *   system. The `z` component is preserved on `LayerPosition` but is not
  *   returned here — callers that need it (e.g. OrthoBuilding for wall-height
  *   projection) should read `pos.z` directly.
  * - If the referenced space is not found, `x` and `y` are returned as-is
  *   (treated as absolute plan coordinates).
- * - Plain `XY` positions are returned unchanged.
+ * - Absolute plan positions are returned unchanged.
  */
 export function resolveLayerPosition(
   pos: LayerPosition,
   model: CanonicalBuildingMapModel,
 ): XY {
+  const toFiniteNumber = (value: unknown, field: 'x' | 'y'): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        console.info('[layer-debug][resolveLayerPosition] coerced string coordinate', { field, value, parsed });
+        return parsed;
+      }
+    }
+    console.warn('[layer-debug][resolveLayerPosition] non-finite coordinate; defaulting to 0', { field, value });
+    return 0;
+  };
+
+  const localId = (value: string) => value.split('#').pop()?.split('/').pop() ?? value;
+
   if ('spaceId' in pos) {
+    const x = toFiniteNumber(pos.x, 'x');
+    const y = toFiniteNumber(pos.y, 'y');
     const space = model.spaces.find((s) => s.id === pos.spaceId);
     if (space) {
       const ring = getPrimaryRing(space);
       const bbox = computeBoundingBox(ring);
-      return { x: bbox.minX + pos.x, y: bbox.minY + pos.y };
+      const resolved = { x: bbox.minX + x, y: bbox.minY + y };
+      console.info('[layer-debug][resolveLayerPosition] space-relative resolved', {
+        spaceId: pos.spaceId,
+        input: { x: pos.x, y: pos.y },
+        resolved,
+      });
+      return resolved;
     }
+
+    const requestedLocalId = localId(pos.spaceId);
+    const localIdMatch = model.spaces.find((s) => localId(s.id) === requestedLocalId);
+    if (localIdMatch) {
+      console.info('[layer-debug][resolveLayerPosition] local-id match found but not reconciled (exact spaceId required)', {
+        requestedSpaceId: pos.spaceId,
+        matchedSpaceId: localIdMatch.id,
+      });
+    }
+
     // Space not found — treat x/y as absolute fallback.
-    return { x: pos.x, y: pos.y };
+    const fallback = { x, y };
+    console.info('[layer-debug][resolveLayerPosition] space not found; using absolute fallback', {
+      spaceId: pos.spaceId,
+      fallback,
+    });
+    return fallback;
   }
-  return { x: pos.x, y: pos.y };
+  const absolute = { x: toFiniteNumber(pos.x, 'x'), y: toFiniteNumber(pos.y, 'y') };
+  console.info('[layer-debug][resolveLayerPosition] absolute resolved', {
+    input: { x: pos.x, y: pos.y },
+    resolved: absolute,
+  });
+  return absolute;
 }

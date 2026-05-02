@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { RdfStore, RdfSelectRow } from './rdfStore';
+import type { RdfStore } from './rdfStore';
 
 export type Id = string;
 
@@ -89,12 +89,18 @@ export type SpaceRelativePosition = {
   z?: number;
 };
 
+export type PlanPosition = {
+  x: number;
+  y: number;
+  z?: number;
+};
+
 /**
  * A position for a layer item — either absolute plan coordinates (XY with an
  * optional `z` height) or space-relative coordinates (identified by `spaceId`).
  * Discriminated by the presence of `spaceId`.
  */
-export type LayerPosition = XY | SpaceRelativePosition;
+export type LayerPosition = PlanPosition | SpaceRelativePosition;
 
 // ---------------------------------------------------------------------------
 // External visual control system
@@ -172,7 +178,7 @@ export type VisualControlState = {
 // External layer system
 // ---------------------------------------------------------------------------
 
-export type LayerQueryContext = {
+export type LayerDataContext = {
   model: CanonicalBuildingMapModel;
   rdfStore: RdfStore;
 };
@@ -189,7 +195,11 @@ export type SpaceLayerItem = {
   labelColor?: string;
 };
 
-/** A circular icon marker placed at a plan-coordinate or space-relative position. */
+/**
+ * A circular icon marker placed at a plan-coordinate or space-relative position.
+ * Coordinates are authored in plan space; OrthoBuilding projects them for rendering.
+ * Optional `z` is ignored by BuildingMap.
+ */
 export type MarkerLayerItem = {
   id: Id;
   position: LayerPosition;
@@ -212,7 +222,11 @@ export type MarkerLayerItem = {
   onClick?: (item: MarkerLayerItem) => void;
 };
 
-/** Floating text anchored to a plan-coordinate or space-relative position. */
+/**
+ * Floating text anchored to a plan-coordinate or space-relative position.
+ * Coordinates are authored in plan space; OrthoBuilding projects them for rendering.
+ * Optional `z` is ignored by BuildingMap.
+ */
 export type AnnotationLayerItem = {
   id: Id;
   position: LayerPosition;
@@ -229,6 +243,7 @@ export type AnnotationLayerItem = {
  * projects the result to screen coordinates. The final projected point and the
  * current viewport scale are forwarded to `render` so the callback can size
  * stroke widths and font sizes consistently with the built-in layers.
+ * Optional `z` is ignored by BuildingMap.
  *
  * The `render` function **must** return react-konva nodes (Group, Circle,
  * Rect, Line, Text, Image, Path, …). Keep it referentially stable (define
@@ -268,45 +283,20 @@ export type LayerData = {
  */
 export type LayerRenderOrder = 'floor' | 'walls' | 'overlay';
 
-/** (a) Static SPARQL string — component runs the query, calls mapResults with the rows. */
-export type SparqlLayerDefinition = {
-  type: 'sparql';
+/**
+ * Custom layer definition with two supported data inputs:
+ * 1. `data` for static, inline layer content.
+ * 2. `getData` for computed/fetched layer content.
+ */
+export type LayerDefinition = {
   id: string;
   label: string;
   color?: string;
   defaultVisible?: boolean;
   renderOrder?: LayerRenderOrder;
-  query: string;
-  mapResults: (rows: RdfSelectRow[], context: LayerQueryContext) => LayerData;
+  data?: LayerData;
+  getData?: (context: LayerDataContext) => LayerData | Promise<LayerData>;
 };
-
-/** (b) Dynamic SPARQL — getQuery receives context so it can build the string at runtime. */
-export type SparqlFnLayerDefinition = {
-  type: 'sparql-fn';
-  id: string;
-  label: string;
-  color?: string;
-  defaultVisible?: boolean;
-  renderOrder?: LayerRenderOrder;
-  getQuery: (context: LayerQueryContext) => string;
-  mapResults: (rows: RdfSelectRow[], context: LayerQueryContext) => LayerData;
-};
-
-/** (c) Custom data provider — can fetch from external APIs, compute locally, etc. */
-export type DataLayerDefinition = {
-  type: 'data';
-  id: string;
-  label: string;
-  color?: string;
-  defaultVisible?: boolean;
-  renderOrder?: LayerRenderOrder;
-  getData: (context: LayerQueryContext) => LayerData | Promise<LayerData>;
-};
-
-export type LayerDefinition =
-  | SparqlLayerDefinition
-  | SparqlFnLayerDefinition
-  | DataLayerDefinition;
 
 export type Diagnostic = {
   level: 'warning' | 'error';

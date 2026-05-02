@@ -9,7 +9,7 @@ import {
   loadBrickRecFromJsonLd,
   loadBrickRecFromTurtle,
 } from './lib';
-import type { BrickRecSource, LayerDefinition } from './lib';
+import type { BrickRecSource, CanonicalBuildingMapModel, LayerDefinition } from './lib';
 import { isSensorAsset, isHvacAsset } from './lib/assetClassifiers';
 import { computeSpaceMetrics, centroidOfRing, getPrimaryRing } from './lib/geometryUtils';
 import {
@@ -17,6 +17,71 @@ import {
   sampleBrickRecSource,
   sampleBrickTurtle,
 } from './lib/sampleData.ts';
+
+function makeSpaceRelativeMarkerFixture(model: CanonicalBuildingMapModel): Array<{
+  id: string;
+  position: { spaceId: string; x: number; y: number };
+  fill: string;
+  stroke: string;
+  radius: number;
+  icon: string;
+  iconColor: string;
+  label: string;
+  tooltip: string;
+}> {
+  const rooms = model.spaces.slice(0, 3);
+  return rooms.flatMap((space, roomIndex) => {
+    const ring = getPrimaryRing(space);
+    const xs = ring.map((p) => p.x);
+    const ys = ring.map((p) => p.y);
+    const minX = xs.length > 0 ? Math.min(...xs) : 0;
+    const maxX = xs.length > 0 ? Math.max(...xs) : 0;
+    const minY = ys.length > 0 ? Math.min(...ys) : 0;
+    const maxY = ys.length > 0 ? Math.max(...ys) : 0;
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+    const centerLocal = { x: width * 0.5, y: height * 0.5 };
+    const boundaryLocal = { x: Math.max(0.2, width * 0.85), y: Math.max(0.2, height * 0.85) };
+
+    const exactSpaceId = space.id;
+    const centerPosition: { spaceId: string; x: number; y: number } = {
+      spaceId: exactSpaceId,
+      x: centerLocal.x,
+      y: centerLocal.y,
+    };
+
+    const boundaryPosition: { spaceId: string; x: number; y: number } = {
+      spaceId: exactSpaceId,
+      x: boundaryLocal.x,
+      y: boundaryLocal.y,
+    };
+
+    return [
+      {
+        id: `fixture-center-${roomIndex + 1}`,
+        position: centerPosition,
+        fill: '#1d4ed8',
+        stroke: '#bfdbfe',
+        radius: 5,
+        icon: 'C',
+        iconColor: '#dbeafe',
+        label: `${space.label} center`,
+        tooltip: `center marker\nspaceId=${centerPosition.spaceId}`,
+      },
+      {
+        id: `fixture-boundary-${roomIndex + 1}`,
+        position: boundaryPosition,
+        fill: '#7c2d12',
+        stroke: '#fdba74',
+        radius: 5,
+        icon: 'B',
+        iconColor: '#ffedd5',
+        label: `${space.label} boundary`,
+        tooltip: `boundary marker\nspaceId=${boundaryPosition.spaceId}`,
+      },
+    ];
+  });
+}
 
 function App() {
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | undefined>();
@@ -31,15 +96,37 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [turtleUrl, setTurtleUrl] = useState('https://brickschema.org/ttl/mortar/bldg1.ttl');
   const [mapSize, setMapSize] = useState({ width: 960, height: 560 });
+  const [showDualMaps, setShowDualMaps] = useState(
+    typeof window !== 'undefined' ? window.innerWidth > 1200 : false,
+  );
   const [visibleLayers, setVisibleLayers] = useState<Record<string, boolean>>({
-    sensors: true,
-    hvac: true,
+    fixtureOverlay: true,
+    fixtureWalls: true,
+    sensors: false,
+    hvac: false,
     roomMetrics: false,
   });
 
   const layerDefinitions = useMemo<LayerDefinition[]>(() => [
     {
-      type: 'data',
+      id: 'fixtureOverlay',
+      label: 'Fixture Markers Overlay',
+      color: '#1d4ed8',
+      renderOrder: 'overlay',
+      getData: ({ model }) => ({
+        markers: makeSpaceRelativeMarkerFixture(model),
+      }),
+    },
+    {
+      id: 'fixtureWalls',
+      label: 'Fixture Markers Walls',
+      color: '#7c2d12',
+      renderOrder: 'walls',
+      getData: ({ model }) => ({
+        markers: makeSpaceRelativeMarkerFixture(model),
+      }),
+    },
+    {
       id: 'sensors',
       label: 'Sensors',
       color: '#0b3b6f',
@@ -65,7 +152,6 @@ function App() {
       }),
     },
     {
-      type: 'data',
       id: 'hvac',
       label: 'HVAC',
       color: '#7c2d12',
@@ -91,7 +177,6 @@ function App() {
       }),
     },
     {
-      type: 'data',
       id: 'roomMetrics',
       label: 'Room Metrics',
       color: '#1e40af',
@@ -184,6 +269,20 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleResize = () => {
+      setShowDualMaps(window.innerWidth > 1200);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
     const host = mapPanelRef.current;
     if (!host || typeof ResizeObserver === 'undefined') {
       return;
@@ -191,7 +290,10 @@ function App() {
 
     const resize = (nextWidth: number) => {
       const safeWidth = Math.max(320, Math.floor(nextWidth));
-      const nextHeight = Math.max(360, Math.min(760, Math.round(safeWidth * 0.62)));
+      const mapWidth = showDualMaps
+        ? Math.max(300, Math.floor((safeWidth - 16) / 2))
+        : safeWidth;
+      const nextHeight = Math.max(360, Math.min(760, Math.round(mapWidth * 0.62)));
       setMapSize({ width: safeWidth, height: nextHeight });
     };
 
@@ -207,7 +309,11 @@ function App() {
     resize(host.getBoundingClientRect().width);
 
     return () => observer.disconnect();
-  }, []);
+  }, [showDualMaps]);
+
+  const mapRenderWidth = showDualMaps
+    ? Math.max(300, Math.floor((mapSize.width - 16) / 2))
+    : mapSize.width;
 
   const handleLoadTurtleFromUrl = async () => {
     if (!turtleUrl.trim()) {
@@ -320,68 +426,76 @@ function App() {
       </header>
 
       <section className="map-panel" ref={mapPanelRef}>
-        {mapView === 'ortho' ? (
-          <OrthoBuilding
-            model={parsed.model}
-            width={mapSize.width}
-            height={mapSize.height}
-            controls={{
-              enabled: true,
-              zoomToFit: true,
-              fullScreen: true,
-              layerPanel: true,
-            }}
-            northDirectionDegrees={profile.northDirectionDegrees}
-            selectedSpaceId={selectedSpaceId}
-            resetToken={resetToken}
-            layers={layerDefinitions}
-            visibleLayers={visibleLayers}
-            onLayerToggle={toggleLayer}
-            onViewportChange={(viewport) => {
-              setViewportLabel(
-                `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
-              );
-            }}
-            onSpaceClick={(space) => setSelectedSpaceId(space.id)}
-            onAssetClick={(asset) => {
-              setSelectedSpaceId(asset.spaceId);
-            }}
-          />
-        ) : (
-          <BuildingMap
-            model={parsed.model}
-            width={mapSize.width}
-            height={mapSize.height}
-            controls={{
-              enabled: true,
-              zoomToFit: true,
-              fullScreen: true,
-              layerPanel: true,
-            }}
-            northDirectionDegrees={profile.northDirectionDegrees}
-            selectedSpaceId={selectedSpaceId}
-            resetToken={resetToken}
-            layers={layerDefinitions}
-            visibleLayers={visibleLayers}
-            onLayerToggle={toggleLayer}
-            onViewportChange={(viewport) => {
-              setViewportLabel(
-                `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
-              );
-            }}
-            onSpaceClick={(space) => setSelectedSpaceId(space.id)}
-            onAssetClick={(asset) => {
-              setSelectedSpaceId(asset.spaceId);
-            }}
-          />
-        )}
+        <div className={showDualMaps ? 'map-compare-grid' : undefined}>
+          {(showDualMaps || mapView === 'plan') ? (
+            <div className={showDualMaps ? 'map-compare-cell' : undefined}>
+              <BuildingMap
+                model={parsed.model}
+                width={mapRenderWidth}
+                height={mapSize.height}
+                controls={{
+                  enabled: true,
+                  zoomToFit: true,
+                  fullScreen: true,
+                  layerPanel: true,
+                }}
+                northDirectionDegrees={profile.northDirectionDegrees}
+                selectedSpaceId={selectedSpaceId}
+                resetToken={resetToken}
+                layers={layerDefinitions}
+                visibleLayers={visibleLayers}
+                onLayerToggle={toggleLayer}
+                onViewportChange={(viewport) => {
+                  setViewportLabel(
+                    `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
+                  );
+                }}
+                onSpaceClick={(space) => setSelectedSpaceId(space.id)}
+                onAssetClick={(asset) => {
+                  setSelectedSpaceId(asset.spaceId);
+                }}
+              />
+            </div>
+          ) : null}
+
+          {(showDualMaps || mapView === 'ortho') ? (
+            <div className={showDualMaps ? 'map-compare-cell' : undefined}>
+              <OrthoBuilding
+                model={parsed.model}
+                width={mapRenderWidth}
+                height={mapSize.height}
+                controls={{
+                  enabled: true,
+                  zoomToFit: true,
+                  fullScreen: true,
+                  layerPanel: true,
+                }}
+                northDirectionDegrees={profile.northDirectionDegrees}
+                selectedSpaceId={selectedSpaceId}
+                resetToken={resetToken}
+                layers={layerDefinitions}
+                visibleLayers={visibleLayers}
+                onLayerToggle={toggleLayer}
+                onViewportChange={(viewport) => {
+                  setViewportLabel(
+                    `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
+                  );
+                }}
+                onSpaceClick={(space) => setSelectedSpaceId(space.id)}
+                onAssetClick={(asset) => {
+                  setSelectedSpaceId(asset.spaceId);
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <section className="map-panel hvac-panel">
         <div className="panel-title">HVAC Topology Map</div>
         <HVACMap
           source={source}
-          width={mapSize.width}
+          width={Math.max(320, mapSize.width)}
           height={420}
           onAssetClick={(assetId) => {
             const matched = (source.assets ?? []).find((asset) => asset.id === assetId);
@@ -414,7 +528,7 @@ function App() {
                 ? 'BRICK JSON-LD (Canonical)'
                 : 'TypeScript Fixture'}
           </p>
-          <p>View: {mapView === 'ortho' ? '2.5D Ortho' : '2D Plan'}</p>
+          <p>View: {showDualMaps ? '2D + 2.5D side by side' : mapView === 'ortho' ? '2.5D Ortho' : '2D Plan'}</p>
           <p>Use mouse wheel to zoom and drag to pan.</p>
         </article>
 

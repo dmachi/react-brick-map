@@ -7,13 +7,13 @@ import type {
   IconSpec,
   LayerData,
   LayerDefinition,
-  LayerQueryContext,
+  LayerDataContext,
   Ring,
   SpaceEntity,
   VisualControlState,
   XY,
 } from './types';
-import { createRdfStore, selectRdfStore, type RdfStore } from './rdfStore';
+import { createRdfStore, type RdfStore } from './rdfStore';
 import { buildAssetTooltip, getNumericAssetMetadata, resolveLayerPosition } from './geometryUtils';
 import {
   collectVisualControlImageUrls,
@@ -609,6 +609,15 @@ type LayerStatus =
   | { status: 'loaded'; data: LayerData }
   | { status: 'error'; error: string };
 
+function countLayerDataItems(data: LayerData) {
+  return {
+    spaces: data.spaces?.length ?? 0,
+    markers: data.markers?.length ?? 0,
+    annotations: data.annotations?.length ?? 0,
+    custom: data.custom?.length ?? 0,
+  };
+}
+
 export function BuildingMap({
   model,
   rdfStore,
@@ -725,7 +734,7 @@ export function BuildingMap({
   // Fetch data for visible external layers that have no cached result.
   useEffect(() => {
     if (!layerDefinitions || layerDefinitions.length === 0) return;
-    const ctx: LayerQueryContext = { model, rdfStore: activeRdfStore };
+    const ctx: LayerDataContext = { model, rdfStore: activeRdfStore };
     const toFetch = layerDefinitions.filter((def) => {
       const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
       return isVisible && !layerStatuses[def.id];
@@ -741,19 +750,16 @@ export function BuildingMap({
       const id = def.id;
       const doFetch = async () => {
         try {
-          let data: LayerData;
-          if (def.type === 'sparql') {
-            const rows = await selectRdfStore(activeRdfStore, def.query);
-            if (cancelled) return;
-            data = def.mapResults(rows, ctx);
-          } else if (def.type === 'sparql-fn') {
-            const rows = await selectRdfStore(activeRdfStore, def.getQuery(ctx));
-            if (cancelled) return;
-            data = def.mapResults(rows, ctx);
-          } else {
-            data = await Promise.resolve(def.getData(ctx));
-            if (cancelled) return;
-          }
+          const data = def.getData
+            ? await Promise.resolve(def.getData(ctx))
+            : (def.data ?? {});
+          if (cancelled) return;
+          console.info('[layer-debug][BuildingMap][layer-load] loaded', {
+            id,
+            source: def.getData ? 'getData' : 'data',
+            renderOrder: def.renderOrder ?? 'overlay',
+            counts: countLayerDataItems(data),
+          });
           setLayerStatuses((prev) => ({ ...prev, [id]: { status: 'loaded', data } }));
         } catch (err) {
           if (cancelled) return;
@@ -766,7 +772,7 @@ export function BuildingMap({
     return () => {
       cancelled = true;
     };
-  }, [layerDefinitions, visibleLayers, layerStatuses, graphStatementCount, model, activeRdfStore]);
+  }, [layerDefinitions, visibleLayers, graphStatementCount, model, activeRdfStore]);
 
   const { floorLayerData, wallsLayerData, overlayLayerData } = useMemo(() => {
     const floor: LayerData[] = [];
@@ -783,6 +789,30 @@ export function BuildingMap({
     }
     return { floorLayerData: floor, wallsLayerData: walls, overlayLayerData: overlay };
   }, [layerDefinitions, visibleLayers, layerStatuses]);
+
+  useEffect(() => {
+    const summarize = (bucket: LayerData[]) => bucket.reduce(
+      (acc, data) => {
+        const counts = countLayerDataItems(data);
+        return {
+          spaces: acc.spaces + counts.spaces,
+          markers: acc.markers + counts.markers,
+          annotations: acc.annotations + counts.annotations,
+          custom: acc.custom + counts.custom,
+        };
+      },
+      { spaces: 0, markers: 0, annotations: 0, custom: 0 },
+    );
+
+    console.info('[layer-debug][BuildingMap][bucket-counts]', {
+      floor: summarize(floorLayerData),
+      walls: summarize(wallsLayerData),
+      overlay: summarize(overlayLayerData),
+      floorLayers: floorLayerData.length,
+      wallsLayers: wallsLayerData.length,
+      overlayLayers: overlayLayerData.length,
+    });
+  }, [floorLayerData, wallsLayerData, overlayLayerData]);
 
   useEffect(() => {
     if (!isExpanded) {
@@ -1278,6 +1308,14 @@ export function BuildingMap({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const markerIndex = (data.markers ?? []).findIndex((m) => m.id === item.id);
+                if (markerIndex >= 0 && markerIndex < 3) {
+                  console.info('[layer-debug][BuildingMap][walls-markers] projected marker', {
+                    layerIndex: li,
+                    markerId: item.id,
+                    projectedPoint: pt,
+                  });
+                }
                 return (
                   <Group key={`wl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Text } from 'react-konva';
-import type { AssetEntity, IconSpec, LayerData, LayerQueryContext, XY } from './types';
-import { createRdfStore, selectRdfStore } from './rdfStore';
+import type { AssetEntity, IconSpec, LayerData, LayerDataContext, LayerPosition, XY } from './types';
+import { createRdfStore } from './rdfStore';
 import type { BuildingMapProps } from './BuildingMap';
 import {
   formatBrickTypeLabel,
@@ -44,6 +44,15 @@ type LayerStatus =
   | { status: 'loading' }
   | { status: 'loaded'; data: LayerData }
   | { status: 'error'; error: string };
+
+function countLayerDataItems(data: LayerData) {
+  return {
+    spaces: data.spaces?.length ?? 0,
+    markers: data.markers?.length ?? 0,
+    annotations: data.annotations?.length ?? 0,
+    custom: data.custom?.length ?? 0,
+  };
+}
 
 export type OrthoBuildingProps = BuildingMapProps;
 
@@ -231,7 +240,7 @@ export function OrthoBuilding({
   // Fetch data for visible external layers that have no cached result.
   useEffect(() => {
     if (!layerDefinitions || layerDefinitions.length === 0) return;
-    const ctx: LayerQueryContext = { model, rdfStore: activeRdfStore };
+    const ctx: LayerDataContext = { model, rdfStore: activeRdfStore };
     const toFetch = layerDefinitions.filter((def) => {
       const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
       return isVisible && !layerStatuses[def.id];
@@ -247,19 +256,16 @@ export function OrthoBuilding({
       const id = def.id;
       const doFetch = async () => {
         try {
-          let data: LayerData;
-          if (def.type === 'sparql') {
-            const rows = await selectRdfStore(activeRdfStore, def.query);
-            if (cancelled) return;
-            data = def.mapResults(rows, ctx);
-          } else if (def.type === 'sparql-fn') {
-            const rows = await selectRdfStore(activeRdfStore, def.getQuery(ctx));
-            if (cancelled) return;
-            data = def.mapResults(rows, ctx);
-          } else {
-            data = await Promise.resolve(def.getData(ctx));
-            if (cancelled) return;
-          }
+          const data = def.getData
+            ? await Promise.resolve(def.getData(ctx))
+            : (def.data ?? {});
+          if (cancelled) return;
+          console.info('[layer-debug][OrthoBuilding][layer-load] loaded', {
+            id,
+            source: def.getData ? 'getData' : 'data',
+            renderOrder: def.renderOrder ?? 'overlay',
+            counts: countLayerDataItems(data),
+          });
           setLayerStatuses((prev) => ({ ...prev, [id]: { status: 'loaded', data } }));
         } catch (err) {
           if (cancelled) return;
@@ -272,7 +278,7 @@ export function OrthoBuilding({
     return () => {
       cancelled = true;
     };
-  }, [layerDefinitions, visibleLayers, layerStatuses, graphStatementCount, model, activeRdfStore]);
+  }, [layerDefinitions, visibleLayers, graphStatementCount, model, activeRdfStore]);
 
   const { floorLayerData, wallsLayerData, overlayLayerData } = useMemo(() => {
     const floor: LayerData[] = [];
@@ -289,6 +295,30 @@ export function OrthoBuilding({
     }
     return { floorLayerData: floor, wallsLayerData: walls, overlayLayerData: overlay };
   }, [layerDefinitions, visibleLayers, layerStatuses]);
+
+  useEffect(() => {
+    const summarize = (bucket: LayerData[]) => bucket.reduce(
+      (acc, data) => {
+        const counts = countLayerDataItems(data);
+        return {
+          spaces: acc.spaces + counts.spaces,
+          markers: acc.markers + counts.markers,
+          annotations: acc.annotations + counts.annotations,
+          custom: acc.custom + counts.custom,
+        };
+      },
+      { spaces: 0, markers: 0, annotations: 0, custom: 0 },
+    );
+
+    console.info('[layer-debug][OrthoBuilding][bucket-counts]', {
+      floor: summarize(floorLayerData),
+      walls: summarize(wallsLayerData),
+      overlay: summarize(overlayLayerData),
+      floorLayers: floorLayerData.length,
+      wallsLayers: wallsLayerData.length,
+      overlayLayers: overlayLayerData.length,
+    });
+  }, [floorLayerData, wallsLayerData, overlayLayerData]);
 
   useEffect(() => {
     if (!isExpanded) {
@@ -321,6 +351,21 @@ export function OrthoBuilding({
       DEFAULT_ORTHO_PERSPECTIVE_STRENGTH,
     );
   }, [model.spaces]);
+
+  const projectLayerPosition = (position: LayerPosition): XY => {
+    const resolved = resolveLayerPosition(position, model);
+    const projected = projectPlanPointFromCenter(resolved, projectionContext);
+    const z = typeof position.z === 'number' && Number.isFinite(position.z) ? position.z : 0;
+    if (z === 0) {
+      return projected;
+    }
+
+    const zFactor = z / Math.max(DEFAULT_ORTHO_DEPTH, 1e-6);
+    return {
+      x: projected.x + (projected.x - resolved.x) * zFactor,
+      y: projected.y + (projected.y - resolved.y) * zFactor,
+    };
+  };
 
   const projectedFitPoints = useMemo(() => {
     const fitPoints: XY[] = [];
@@ -758,11 +803,21 @@ export function OrthoBuilding({
                 )];
               }),
               ...(data.markers ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const resolved = resolveLayerPosition(item.position, model);
+                const pt = projectLayerPosition(item.position);
                 const r = (item.radius ?? 5) / viewport.scale;
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const markerIndex = (data.markers ?? []).findIndex((m) => m.id === item.id);
+                if (markerIndex >= 0 && markerIndex < 3) {
+                  console.info('[layer-debug][OrthoBuilding][walls-markers] projected marker', {
+                    layerIndex: li,
+                    markerId: item.id,
+                    resolvedPoint: resolved,
+                    projectedPoint: pt,
+                  });
+                }
                 return (
                   <Group key={`fl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
@@ -788,7 +843,7 @@ export function OrthoBuilding({
                 );
               }),
               ...(data.annotations ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 return (
                   <Text key={`fl-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
                     text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
@@ -796,7 +851,7 @@ export function OrthoBuilding({
                 );
               }),
               ...(data.custom ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 return (
                   <Group key={`fl-cu-${li}-${item.id}`}
                     onClick={() => item.onClick?.()}
@@ -914,7 +969,7 @@ export function OrthoBuilding({
                 )];
               }),
               ...(data.markers ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 const r = (item.radius ?? 5) / viewport.scale;
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
@@ -944,7 +999,7 @@ export function OrthoBuilding({
                 );
               }),
               ...(data.annotations ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 return (
                   <Text key={`wl-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
                     text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
@@ -952,7 +1007,7 @@ export function OrthoBuilding({
                 );
               }),
               ...(data.custom ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 return (
                   <Group key={`wl-cu-${li}-${item.id}`}
                     onClick={() => item.onClick?.()}
@@ -1087,7 +1142,7 @@ export function OrthoBuilding({
                 )];
               }),
               ...(data.markers ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 const r = (item.radius ?? 5) / viewport.scale;
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
@@ -1117,7 +1172,7 @@ export function OrthoBuilding({
                 );
               }),
               ...(data.annotations ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 return (
                   <Text key={`ov-an-${li}-${item.id}`} x={pt.x} y={pt.y - 10 / viewport.scale}
                     text={item.text} fill={item.color ?? resolvedTheme.annotationColor}
@@ -1125,7 +1180,7 @@ export function OrthoBuilding({
                 );
               }),
               ...(data.custom ?? []).map((item) => {
-                const pt = projectPlanPointFromCenter(resolveLayerPosition(item.position, model), projectionContext);
+                const pt = projectLayerPosition(item.position);
                 return (
                   <Group key={`ov-cu-${li}-${item.id}`}
                     onClick={() => item.onClick?.()}
