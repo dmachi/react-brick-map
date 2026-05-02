@@ -1,8 +1,13 @@
 export { BuildingMap } from './BuildingMap.tsx';
+export { OrthoBuilding } from './OrthoBuilding.tsx';
 export { HVACMap } from './HVACMap.tsx';
 export {
   DEFAULT_BUILDING_MAP_THEME,
 } from './BuildingMap.tsx';
+export {
+  DEFAULT_ORTHO_DEPTH,
+  DEFAULT_ORTHO_ANGLE_DEGREES,
+} from './orthoProjection';
 export type {
   HVACMapProps,
 } from './HVACMap.tsx';
@@ -15,6 +20,9 @@ export type {
   BuildingMapThemeOverrides,
   SpaceThemeStyle,
 } from './BuildingMap.tsx';
+export type {
+  OrthoBuildingProps,
+} from './OrthoBuilding.tsx';
 
 export { parseBrickRecSource } from './brickRecAdapter';
 export type {

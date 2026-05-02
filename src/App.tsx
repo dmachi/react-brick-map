@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import {
   BuildingMap,
+  OrthoBuilding,
   HVACMap,
   parseBrickRecSource,
   parseGeometryProfile,
@@ -23,6 +24,7 @@ function App() {
   const [resetToken, setResetToken] = useState(0);
   const [viewportLabel, setViewportLabel] = useState('x:0 y:0 z:1');
   const [sourceType, setSourceType] = useState<'fixture' | 'turtle' | 'jsonld'>('jsonld');
+  const [mapView, setMapView] = useState<'plan' | 'ortho'>('plan');
   const [loadedSource, setLoadedSource] = useState<BrickRecSource | null>(null);
   const [loadedSourceType, setLoadedSourceType] = useState<'turtle' | 'jsonld' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -180,6 +182,20 @@ function App() {
           </button>
         </div>
         <div className="controls-row">
+          <label htmlFor="map-view-select">Map view</label>
+          <select
+            id="map-view-select"
+            value={mapView}
+            onChange={(event) => {
+              setMapView(event.target.value as 'plan' | 'ortho');
+              setResetToken((value) => value + 1);
+            }}
+          >
+            <option value="plan">2D Plan</option>
+            <option value="ortho">2.5D Ortho</option>
+          </select>
+        </div>
+        <div className="controls-row">
           <label htmlFor="source-select">Data source</label>
           <select
             id="source-select"
@@ -217,26 +233,49 @@ function App() {
       </header>
 
       <section className="map-panel" ref={mapPanelRef}>
-        <BuildingMap
-          model={parsed.model}
-          width={mapSize.width}
-          height={mapSize.height}
-          showControls
-          northDirectionDegrees={profile.northDirectionDegrees}
-          selectedSpaceId={selectedSpaceId}
-          resetToken={resetToken}
-          visibleLayers={visibleLayers}
-          onLayerToggle={toggleLayer}
-          onViewportChange={(viewport) => {
-            setViewportLabel(
-              `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
-            );
-          }}
-          onSpaceClick={(space) => setSelectedSpaceId(space.id)}
-          onAssetClick={(asset) => {
-            setSelectedSpaceId(asset.spaceId);
-          }}
-        />
+        {mapView === 'ortho' ? (
+          <OrthoBuilding
+            model={parsed.model}
+            width={mapSize.width}
+            height={mapSize.height}
+            showControls
+            northDirectionDegrees={profile.northDirectionDegrees}
+            selectedSpaceId={selectedSpaceId}
+            resetToken={resetToken}
+            visibleLayers={visibleLayers}
+            onLayerToggle={toggleLayer}
+            onViewportChange={(viewport) => {
+              setViewportLabel(
+                `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
+              );
+            }}
+            onSpaceClick={(space) => setSelectedSpaceId(space.id)}
+            onAssetClick={(asset) => {
+              setSelectedSpaceId(asset.spaceId);
+            }}
+          />
+        ) : (
+          <BuildingMap
+            model={parsed.model}
+            width={mapSize.width}
+            height={mapSize.height}
+            showControls
+            northDirectionDegrees={profile.northDirectionDegrees}
+            selectedSpaceId={selectedSpaceId}
+            resetToken={resetToken}
+            visibleLayers={visibleLayers}
+            onLayerToggle={toggleLayer}
+            onViewportChange={(viewport) => {
+              setViewportLabel(
+                `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
+              );
+            }}
+            onSpaceClick={(space) => setSelectedSpaceId(space.id)}
+            onAssetClick={(asset) => {
+              setSelectedSpaceId(asset.spaceId);
+            }}
+          />
+        )}
       </section>
 
       <section className="map-panel hvac-panel">
@@ -276,6 +315,7 @@ function App() {
                 ? 'BRICK JSON-LD (Canonical)'
                 : 'TypeScript Fixture'}
           </p>
+          <p>View: {mapView === 'ortho' ? '2.5D Ortho' : '2D Plan'}</p>
           <p>Use mouse wheel to zoom and drag to pan.</p>
         </article>
 

@@ -11,6 +11,7 @@ import type {
 } from './types';
 import { DEFAULT_LAYER_VISIBILITY } from './types';
 import { createRdfStore, type RdfStore } from './rdfStore';
+import { buildAssetTooltip, getNumericAssetMetadata } from './geometryUtils';
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
@@ -302,31 +303,6 @@ function computeSpaceMetrics(space: SpaceEntity): { area: number; width: number;
     width: Math.max(...xs) - Math.min(...xs),
     height: Math.max(...ys) - Math.min(...ys),
   };
-}
-
-function buildAssetTooltip(asset: AssetEntity): string {
-  const lines: string[] = [asset.label];
-  const typeLabel = formatBrickTypeLabel(asset.brickClass);
-  if (typeLabel) {
-    lines.push(typeLabel);
-  }
-
-  if (asset.metadata) {
-    const detailEntries = Object.entries(asset.metadata)
-      .filter(([, value]) => value !== null && value !== undefined)
-      .slice(0, 4);
-
-    for (const [key, value] of detailEntries) {
-      lines.push(`${key}: ${String(value)}`);
-    }
-  }
-
-  return lines.join('\n');
-}
-
-function getNumericAssetMetadata(asset: AssetEntity, key: string): number | undefined {
-  const value = asset.metadata?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 export type BuildingMapProps = {
