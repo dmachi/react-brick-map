@@ -6,6 +6,9 @@ React + Konva building-map components backed by BRICK/REC semantic data. Support
 
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
+- [Visual Controls API](#visual-controls-api)
+  - [Precedence](#precedence)
+  - [Examples](#examples-1)
 - [External Layer API](#external-layer-api)
   - [Layer types](#layer-types)
   - [Item types](#item-types)
@@ -55,6 +58,93 @@ Source (BRICK/REC JSON-LD or Turtle)
 3. **Adapter layer** — mapped into canonical `CanonicalBuildingMapModel`.
 4. **Renderer layer** — React Konva stage renders spaces, assets, annotations, and external layers.
 
+## Visual Controls API
+
+`BuildingMap` and `OrthoBuilding` accept an optional `visualControls` prop for external, in-process visual overrides.
+
+```tsx
+import type { VisualControlState } from './lib';
+
+const visualControls: VisualControlState = {
+  classes: {
+    spaces: {
+      office: { fill: '#e0f2fe', fillSelected: '#7dd3fc' },
+    },
+    assets: {
+      sensor: { fill: '#082f49', stroke: '#38bdf8' },
+    },
+  },
+  spaces: {
+    'space-office-b': { fill: '#fde68a', labelColor: '#78350f' },
+  },
+  assets: {
+    'asset-temp-1': {
+      icon: { kind: 'svg-path', path: 'M12 2 L20 20 L4 20 Z', viewBoxWidth: 24, viewBoxHeight: 24 },
+      rotation: { velocityDegreesPerSecond: 30, baseDegrees: 0, startTimeMs: Date.now() },
+    },
+    'asset-co2-1': {
+      icon: { kind: 'image', url: '/icons/co2.png', width: 16, height: 16 },
+    },
+  },
+};
+
+<BuildingMap model={model} width={960} height={560} visualControls={visualControls} />
+```
+
+### Precedence
+
+Visual resolution order is:
+
+1. Base theme (`theme` + `themeOverrides`)
+2. Class-level visual controls (`visualControls.classes`)
+3. Instance-level visual controls (`visualControls.spaces` / `visualControls.assets`)
+4. Rotation control: explicit `angleDegrees` overrides velocity-driven animation
+
+For velocity-driven rotation, the component uses an internal animation clock by default.
+If `visualControls.animationClockMs` is supplied, that external clock is used instead.
+
+### Examples
+
+Change a single space color:
+
+```tsx
+const visualControls: VisualControlState = {
+  spaces: {
+    'space-lobby': { fill: '#fca5a5', fillHover: '#f87171', fillSelected: '#ef4444' },
+  },
+};
+```
+
+Change a single object icon/color:
+
+```tsx
+const visualControls: VisualControlState = {
+  assets: {
+    'asset-vav-7': {
+      fill: '#3f3f46',
+      stroke: '#a1a1aa',
+      icon: { kind: 'text', text: 'V' },
+    },
+  },
+};
+```
+
+External-driven rotation (hybrid mode):
+
+```tsx
+const visualControls: VisualControlState = {
+  animationClockMs: performance.now(),
+  assets: {
+    'asset-fan-1': {
+      rotation: {
+        // this explicit angle wins over velocity if both are present
+        angleDegrees: fanAngle,
+      },
+    },
+  },
+};
+```
+
 ---
 
 ## External Layer API
@@ -85,7 +175,7 @@ All three share the common fields:
 ```ts
 {
   type: 'data' | 'sparql' | 'sparql-fn';
-  id: string;           // unique key; 'floorPlan' is reserved for the built-in layer
+  id: string;           // unique key (built-in ids are not part of external layers)
   label: string;        // shown in the layer panel
   color?: string;       // accent colour for the layer panel swatch
   defaultVisible?: boolean;
@@ -440,11 +530,10 @@ const liveTemperatureLayer: LayerDefinition = {
 
 ## Layer panel
 
-Pass `onLayerToggle` to either component to render the built-in layer panel. The panel shows a toggle button per layer (including the built-in `'floorPlan'` layer) with loading and error indicators.
+Pass `onLayerToggle` to either component to render the layer panel. The panel only shows external layers and includes loading/error indicators.
 
 ```tsx
 const [visibleLayers, setVisibleLayers] = useState({
-  floorPlan: true,
   sensors: true,
   occupancy: false,
 });
@@ -456,9 +545,57 @@ const [visibleLayers, setVisibleLayers] = useState({
   onLayerToggle={(id) =>
     setVisibleLayers((prev) => ({ ...prev, [id]: !prev[id] }))
   }
-  showControls
 />
 ```
+
+## Controls layer (built-in UI)
+
+The base floor-plan layer is always visible and cannot be toggled.
+
+The controls layer is built in and configured via the `controls` prop (not via `visibleLayers`).
+
+Enable all built-in controls:
+
+```tsx
+<BuildingMap
+  model={model}
+  controls={{
+    enabled: true,
+    zoomToFit: true,
+    fullScreen: true,
+    layerPanel: true,
+    compass: true,
+  }}
+/>
+```
+
+Disable one control while keeping the rest enabled:
+
+```tsx
+<OrthoBuilding
+  model={model}
+  controls={{
+    enabled: true,
+    zoomToFit: true,
+    fullScreen: true,
+    layerPanel: true,
+    compass: false,
+  }}
+/>
+```
+
+Defaults when `controls` is omitted:
+- `enabled: true`
+- `compass: true`
+- `zoomToFit` / `fullScreen`: follow `showControls`
+- `layerPanel`: enabled when `onLayerToggle` is provided
+
+- `enabled`: master switch for all built-in control widgets.
+- `zoomToFit` / `fullScreen`: left-side action buttons.
+- `layerPanel`: external-layer toggle panel.
+- `compass`: north compass.
+
+Compatibility note: `showControls` still works as a shorthand for `zoomToFit` + `fullScreen` defaults.
 
 ---
 

@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Arc, Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import { Arc, Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Text } from 'react-konva';
 import type {
   AnnotationEntity,
   AssetEntity,
   CanonicalBuildingMapModel,
+  IconSpec,
   LayerData,
   LayerDefinition,
   LayerQueryContext,
   Ring,
   SpaceEntity,
+  VisualControlState,
   XY,
 } from './types';
 import { createRdfStore, selectRdfStore, type RdfStore } from './rdfStore';
 import { buildAssetTooltip, getNumericAssetMetadata, resolveLayerPosition } from './geometryUtils';
+import {
+  collectVisualControlImageUrls,
+  getIconText,
+  hasVelocityRotation,
+  isImageIcon,
+  resolveAssetVisual,
+  resolveSpaceVisual,
+} from './visualControls';
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
@@ -268,28 +278,6 @@ function isFloorPlanAsset(asset: AssetEntity): boolean {
   return isDoorAsset(asset) || isWindowAsset(asset);
 }
 
-function computePolygonArea(ring: Ring): number {
-  let area = 0;
-  for (let i = 0; i < ring.length - 1; i++) {
-    area += ring[i].x * ring[i + 1].y - ring[i + 1].x * ring[i].y;
-  }
-  return Math.abs(area) / 2;
-}
-
-function computeSpaceMetrics(space: SpaceEntity): { area: number; width: number; height: number } {
-  const ring = getPrimaryRing(space);
-  if (ring.length < 3) {
-    return { area: 0, width: 0, height: 0 };
-  }
-  const xs = ring.map((p) => p.x);
-  const ys = ring.map((p) => p.y);
-  return {
-    area: computePolygonArea(ring),
-    width: Math.max(...xs) - Math.min(...xs),
-    height: Math.max(...ys) - Math.min(...ys),
-  };
-}
-
 export type BuildingMapProps = {
   model: CanonicalBuildingMapModel;
   rdfStore?: RdfStore;
@@ -306,13 +294,28 @@ export type BuildingMapProps = {
   onAssetClick?: (asset: AssetEntity) => void;
   /** External layer definitions provided by the consuming application. */
   layers?: LayerDefinition[];
-  /** Visibility state keyed by layer id. The reserved id "floorPlan" controls the built-in layer. */
+  /** Visibility state keyed by external layer id. */
   visibleLayers?: Record<string, boolean>;
   onLayerToggle?: (layerId: string) => void;
   // Typed partial overrides for TypeScript consumers.
   theme?: BuildingMapThemeOverrides;
   // Dictionary overrides for runtime-configurable theming sources.
   themeOverrides?: BuildingMapThemeDictionary;
+  /** External visual state (class + instance overrides, icon and rotation control). */
+  visualControls?: VisualControlState;
+  /** Component-level control visibility (not part of toggleable map layers). */
+  controls?: {
+    enabled?: boolean;
+    zoomToFit?: boolean;
+    fullScreen?: boolean;
+    layerPanel?: boolean;
+    compass?: boolean;
+  };
+  /**
+   * When true, selecting a space zooms and centers the viewport to fit that space.
+   * Deselecting (selectedSpaceId becomes undefined) restores the zoom-to-fit-all view.
+   */
+  zoomToSelection?: boolean;
   showControls?: boolean;
 };
 
@@ -625,9 +628,16 @@ export function BuildingMap({
   onLayerToggle,
   theme,
   themeOverrides,
+  visualControls,
+  controls,
+  zoomToSelection = true,
   showControls = false,
 }: BuildingMapProps) {
-  const floorPlanVisible = visibleLayers?.floorPlan ?? true;
+  const controlsEnabled = controls?.enabled ?? true;
+  const showZoomToFitControl = controlsEnabled && (controls?.zoomToFit ?? showControls);
+  const showFullScreenControl = controlsEnabled && (controls?.fullScreen ?? showControls);
+  const showLayerPanelControl = controlsEnabled && (controls?.layerPanel ?? Boolean(onLayerToggle));
+  const showCompassControl = controlsEnabled && (controls?.compass ?? true);
   const activeRdfStore = useMemo(() => rdfStore ?? createRdfStore(), [rdfStore]);
   const graphStatementCount = activeRdfStore.statements.length;
   const [isExpanded, setIsExpanded] = useState(false);
@@ -646,10 +656,66 @@ export function BuildingMap({
     () => resolveTheme(theme, themeOverrides),
     [theme, themeOverrides],
   );
+  const [internalAnimationClockMs, setInternalAnimationClockMs] = useState(() => Date.now());
+  const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement>>({});
+
+  const imageUrls = useMemo(
+    () => collectVisualControlImageUrls(visualControls),
+    [visualControls],
+  );
+  const hasInternalAnimation = useMemo(
+    () => hasVelocityRotation(visualControls) && visualControls?.animationClockMs === undefined,
+    [visualControls],
+  );
+  const renderClockMs = visualControls?.animationClockMs ?? internalAnimationClockMs;
 
   useEffect(() => {
     viewportChangeRef.current = onViewportChange;
   }, [onViewportChange]);
+
+  useEffect(() => {
+    if (!hasInternalAnimation) {
+      return;
+    }
+
+    let frame = 0;
+    const tick = () => {
+      setInternalAnimationClockMs(Date.now());
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [hasInternalAnimation]);
+
+  useEffect(() => {
+    if (imageUrls.length === 0 || typeof window === 'undefined') {
+      return;
+    }
+
+    let cancelled = false;
+    const pending: HTMLImageElement[] = [];
+    for (const url of imageUrls) {
+      if (!url || iconImages[url]) {
+        continue;
+      }
+      const image = new window.Image();
+      pending.push(image);
+      image.onload = () => {
+        if (cancelled) {
+          return;
+        }
+        setIconImages((prev) => (prev[url] ? prev : { ...prev, [url]: image }));
+      };
+      image.src = url;
+    }
+
+    return () => {
+      cancelled = true;
+      for (const image of pending) {
+        image.onload = null;
+      }
+    };
+  }, [iconImages, imageUrls]);
 
   // Invalidate layer cache when the RDF store changes.
   useEffect(() => {
@@ -757,6 +823,52 @@ export function BuildingMap({
     viewportChangeRef.current?.(next);
   }, [transform.offsetX, transform.offsetY, transform.scale, resetToken]);
 
+  useEffect(() => {
+    if (!zoomToSelection) {
+      return;
+    }
+
+    if (!selectedSpaceId) {
+      updateViewport({
+        x: transform.offsetX,
+        y: transform.offsetY,
+        scale: transform.scale,
+      });
+      return;
+    }
+
+    const space = model.spaces.find((s) => s.id === selectedSpaceId);
+    if (!space) {
+      return;
+    }
+
+    const ring =
+      space.geometry.type === 'Polygon'
+        ? (space.geometry.rings[0] ?? [])
+        : (space.geometry.polygons[0]?.[0] ?? []);
+    if (ring.length === 0) {
+      return;
+    }
+
+    const xs = ring.map((p) => p.x);
+    const ys = ring.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const dataWidth = Math.max(1, maxX - minX);
+    const dataHeight = Math.max(1, maxY - minY);
+    const selectionPadding = padding * 3;
+    const newScale = Math.min(
+      (mapWidth - selectionPadding * 2) / dataWidth,
+      (mapHeight - selectionPadding * 2) / dataHeight,
+    );
+    const newX = selectionPadding - minX * newScale + (mapWidth - selectionPadding * 2 - dataWidth * newScale) / 2;
+    const newY = selectionPadding - minY * newScale + (mapHeight - selectionPadding * 2 - dataHeight * newScale) / 2;
+    updateViewport({ x: newX, y: newY, scale: newScale });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSpaceId, zoomToSelection]);
+
   function updateViewport(next: { x: number; y: number; scale: number }) {
     setViewport(next);
     viewportChangeRef.current?.(next);
@@ -794,6 +906,71 @@ export function BuildingMap({
     };
 
     updateViewport(next);
+  }
+
+  function renderIconAt(
+    icon: IconSpec | undefined,
+    x: number,
+    y: number,
+    scale: number,
+    fallbackColor: string,
+  ) {
+    if (!icon) {
+      return null;
+    }
+
+    if (icon.kind === 'text') {
+      return (
+        <Text
+          x={x}
+          y={y}
+          text={icon.text}
+          fontSize={6 / scale}
+          fill={fallbackColor}
+          offsetX={2 / scale}
+          offsetY={2 / scale}
+        />
+      );
+    }
+
+    if (icon.kind === 'svg-path') {
+      const widthPx = (icon.width ?? 10) / scale;
+      const heightPx = (icon.height ?? 10) / scale;
+      const viewBoxWidth = icon.viewBoxWidth ?? 24;
+      const viewBoxHeight = icon.viewBoxHeight ?? 24;
+      return (
+        <Path
+          data={icon.path}
+          x={x - widthPx / 2}
+          y={y - heightPx / 2}
+          scaleX={widthPx / viewBoxWidth}
+          scaleY={heightPx / viewBoxHeight}
+          fill={icon.fill ?? fallbackColor}
+          stroke={icon.stroke}
+          strokeWidth={icon.strokeWidth != null ? icon.strokeWidth / scale : undefined}
+        />
+      );
+    }
+
+    if (isImageIcon(icon)) {
+      const image = iconImages[icon.url];
+      if (!image) {
+        return null;
+      }
+      const widthPx = (icon.width ?? 14) / scale;
+      const heightPx = (icon.height ?? 14) / scale;
+      return (
+        <KonvaImage
+          image={image}
+          x={x - widthPx / 2}
+          y={y - heightPx / 2}
+          width={widthPx}
+          height={heightPx}
+        />
+      );
+    }
+
+    return null;
   }
 
   const overflowScale = Math.max(1, viewport.scale / Math.max(transform.scale, 0.0001));
@@ -838,7 +1015,7 @@ export function BuildingMap({
           : {}),
       }}
     >
-      {showControls ? (
+      {showZoomToFitControl || showFullScreenControl ? (
         <div
           style={{
             position: 'absolute',
@@ -850,39 +1027,43 @@ export function BuildingMap({
             gap: 8,
           }}
         >
-          <button
-            type="button"
-            onClick={resetViewport}
-            style={{
-              border: '1px solid rgba(15,23,42,0.35)',
-              borderRadius: 8,
-              background: 'rgba(255, 255, 255, 0.9)',
-              color: '#0f172a',
-              fontSize: 12,
-              fontWeight: 600,
-              padding: '6px 9px',
-              cursor: 'pointer',
-            }}
-          >
-            Zoom to Fit
-          </button>
+          {showZoomToFitControl ? (
+            <button
+              type="button"
+              onClick={resetViewport}
+              style={{
+                border: '1px solid rgba(15,23,42,0.35)',
+                borderRadius: 8,
+                background: 'rgba(255, 255, 255, 0.9)',
+                color: '#0f172a',
+                fontSize: 12,
+                fontWeight: 600,
+                padding: '6px 9px',
+                cursor: 'pointer',
+              }}
+            >
+              Zoom to Fit
+            </button>
+          ) : null}
 
-          <button
-            type="button"
-            onClick={() => setIsExpanded((value) => !value)}
-            style={{
-              border: '1px solid rgba(15,23,42,0.35)',
-              borderRadius: 8,
-              background: 'rgba(255, 255, 255, 0.9)',
-              color: '#0f172a',
-              fontSize: 12,
-              fontWeight: 600,
-              padding: '6px 9px',
-              cursor: 'pointer',
-            }}
-          >
-            {isExpanded ? 'Exit Full Screen' : 'Full Screen'}
-          </button>
+          {showFullScreenControl ? (
+            <button
+              type="button"
+              onClick={() => setIsExpanded((value) => !value)}
+              style={{
+                border: '1px solid rgba(15,23,42,0.35)',
+                borderRadius: 8,
+                background: 'rgba(255, 255, 255, 0.9)',
+                color: '#0f172a',
+                fontSize: 12,
+                fontWeight: 600,
+                padding: '6px 9px',
+                cursor: 'pointer',
+              }}
+            >
+              {isExpanded ? 'Exit Full Screen' : 'Full Screen'}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -991,11 +1172,12 @@ export function BuildingMap({
               }),
             ])}
 
-            {floorPlanVisible && model.spaces.map((space) => {
+            {model.spaces.map((space) => {
               const isSelected = selectedSpaceId === space.id;
               const isHovered = hoveredSpaceId === space.id;
-              const spaceStyle = resolveSpaceStyle(resolvedTheme, space);
-              const spaceTypeLabel = formatBrickTypeLabel(space.brickClass) ?? spaceStyle.icon;
+              const baseSpaceStyle = resolveSpaceStyle(resolvedTheme, space);
+              const spaceStyle = resolveSpaceVisual(space, baseSpaceStyle, visualControls);
+              const spaceTypeLabel = getIconText(spaceStyle.iconSpec) ?? formatBrickTypeLabel(space.brickClass) ?? spaceStyle.icon;
 
               const fill = isSelected
                 ? spaceStyle.fillSelected
@@ -1142,8 +1324,9 @@ export function BuildingMap({
               }),
             ])}
 
-            {floorPlanVisible && model.assets.filter(isFloorPlanAsset).map((asset) => {
-              const assetStyle = resolveAssetStyle(resolvedTheme, asset);
+            {model.assets.filter(isFloorPlanAsset).map((asset) => {
+              const baseAssetStyle = resolveAssetStyle(resolvedTheme, asset);
+              const assetStyle = resolveAssetVisual(asset, baseAssetStyle, visualControls, renderClockMs);
               const doorAsset = isDoorAsset(asset);
               const windowAsset = isWindowAsset(asset);
               const commercialDoorWidth = getNumericAssetMetadata(asset, 'openingWidthMeters') ?? 0.9;
@@ -1176,6 +1359,9 @@ export function BuildingMap({
               return (
                 <Group
                   key={asset.id}
+                  rotation={assetStyle.rotationDegrees}
+                  x={asset.position.x}
+                  y={asset.position.y}
                   onClick={() => onAssetClick?.(asset)}
                   onMouseEnter={updateHoverFromEvent}
                   onMouseMove={updateHoverFromEvent}
@@ -1185,10 +1371,10 @@ export function BuildingMap({
                     <>
                       <Line
                         points={[
-                          asset.position.x,
-                          asset.position.y,
-                          asset.position.x,
-                          asset.position.y + symbolSize,
+                          0,
+                          0,
+                          0,
+                          symbolSize,
                         ]}
                         stroke={assetStyle.fill}
                         strokeWidth={2.2 / viewport.scale}
@@ -1196,18 +1382,18 @@ export function BuildingMap({
                       />
                       <Line
                         points={[
-                          asset.position.x,
-                          asset.position.y,
-                          asset.position.x + symbolSize,
-                          asset.position.y,
+                          0,
+                          0,
+                          symbolSize,
+                          0,
                         ]}
                         stroke={assetStyle.fill}
                         strokeWidth={2 / viewport.scale}
                         lineCap="round"
                       />
                       <Arc
-                        x={asset.position.x}
-                        y={asset.position.y}
+                        x={0}
+                        y={0}
                         innerRadius={0}
                         outerRadius={symbolSize}
                         angle={90}
@@ -1221,10 +1407,10 @@ export function BuildingMap({
                     <>
                       <Line
                         points={[
-                          asset.position.x - windowTx * windowHalfSpan,
-                          asset.position.y - windowTy * windowHalfSpan,
-                          asset.position.x + windowTx * windowHalfSpan,
-                          asset.position.y + windowTy * windowHalfSpan,
+                          -windowTx * windowHalfSpan,
+                          -windowTy * windowHalfSpan,
+                          windowTx * windowHalfSpan,
+                          windowTy * windowHalfSpan,
                         ]}
                         stroke={assetStyle.stroke}
                         strokeWidth={2.6 / viewport.scale}
@@ -1232,10 +1418,10 @@ export function BuildingMap({
                       />
                       <Line
                         points={[
-                          asset.position.x - windowTx * windowHalfSpan - windowNx * (2.3 / viewport.scale),
-                          asset.position.y - windowTy * windowHalfSpan - windowNy * (2.3 / viewport.scale),
-                          asset.position.x + windowTx * windowHalfSpan - windowNx * (2.3 / viewport.scale),
-                          asset.position.y + windowTy * windowHalfSpan - windowNy * (2.3 / viewport.scale),
+                          -windowTx * windowHalfSpan - windowNx * (2.3 / viewport.scale),
+                          -windowTy * windowHalfSpan - windowNy * (2.3 / viewport.scale),
+                          windowTx * windowHalfSpan - windowNx * (2.3 / viewport.scale),
+                          windowTy * windowHalfSpan - windowNy * (2.3 / viewport.scale),
                         ]}
                         stroke={assetStyle.fill}
                         strokeWidth={1.8 / viewport.scale}
@@ -1245,31 +1431,27 @@ export function BuildingMap({
                   ) : (
                     <>
                       <Circle
-                        x={iconPosition.x}
-                        y={iconPosition.y}
+                        x={iconPosition.x - asset.position.x}
+                        y={iconPosition.y - asset.position.y}
                         radius={assetStyle.radius / viewport.scale}
                         fill={assetStyle.fill}
                         stroke={assetStyle.stroke}
                         strokeWidth={1 / viewport.scale}
                       />
-                      {assetStyle.icon ? (
-                        <Text
-                          x={iconPosition.x}
-                          y={iconPosition.y}
-                          text={assetStyle.icon}
-                          fontSize={6 / viewport.scale}
-                          fill={assetStyle.iconColor ?? assetStyle.labelColor}
-                          offsetX={2 / viewport.scale}
-                          offsetY={2 / viewport.scale}
-                        />
-                      ) : null}
+                      {renderIconAt(
+                        assetStyle.iconSpec,
+                        iconPosition.x - asset.position.x,
+                        iconPosition.y - asset.position.y,
+                        viewport.scale,
+                        assetStyle.iconColor ?? assetStyle.labelColor,
+                      )}
                     </>
                   )}
                 </Group>
               );
             })}
 
-            {floorPlanVisible && model.annotations.map((annotation) => {
+            {model.annotations.map((annotation) => {
               const anchor = findAnchorForAnnotation(annotation, model);
               return (
                 <Text
@@ -1380,35 +1562,37 @@ export function BuildingMap({
         </Stage>
       ) : null}
 
-      <div
-        style={{
-          position: 'absolute',
-          right: 10,
-          top: 10,
-          width: 44,
-          height: 44,
-          borderRadius: 999,
-          border: '1px solid rgba(15, 23, 42, 0.35)',
-          background: 'rgba(255, 255, 255, 0.82)',
-          display: 'grid',
-          placeItems: 'center',
-          pointerEvents: 'none',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
-          zIndex: 5,
-        }}
-        aria-hidden="true"
-      >
-        <svg width="34" height="34" viewBox="0 0 34 34" role="img" aria-label="North compass">
-          <circle cx="17" cy="17" r="15" fill="none" stroke="rgba(15,23,42,0.25)" strokeWidth="1" />
-          <g transform={`rotate(${northDirectionDegrees} 17 17)`}>
-            <line x1="17" y1="24" x2="17" y2="9" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
-            <polygon points="17,6 13.5,11 20.5,11" fill="#0f172a" />
-          </g>
-          <text x="17" y="31" textAnchor="middle" fontSize="8" fill="#0f172a" fontWeight="700">N</text>
-        </svg>
-      </div>
+      {showCompassControl ? (
+        <div
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: 10,
+            width: 44,
+            height: 44,
+            borderRadius: 999,
+            border: '1px solid rgba(15, 23, 42, 0.35)',
+            background: 'rgba(255, 255, 255, 0.82)',
+            display: 'grid',
+            placeItems: 'center',
+            pointerEvents: 'none',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+            zIndex: 5,
+          }}
+          aria-hidden="true"
+        >
+          <svg width="34" height="34" viewBox="0 0 34 34" role="img" aria-label="North compass">
+            <circle cx="17" cy="17" r="15" fill="none" stroke="rgba(15,23,42,0.25)" strokeWidth="1" />
+            <g transform={`rotate(${northDirectionDegrees} 17 17)`}>
+              <line x1="17" y1="24" x2="17" y2="9" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+              <polygon points="17,6 13.5,11 20.5,11" fill="#0f172a" />
+            </g>
+            <text x="17" y="31" textAnchor="middle" fontSize="8" fill="#0f172a" fontWeight="700">N</text>
+          </svg>
+        </div>
+      ) : null}
 
-      {onLayerToggle ? (
+      {onLayerToggle && showLayerPanelControl ? (
         <div
           style={{
             position: 'absolute',
@@ -1429,18 +1613,13 @@ export function BuildingMap({
           aria-label="Map layers"
         >
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: '#64748b', textTransform: 'uppercase', marginBottom: 2 }}>Layers</span>
-          {([
-            { id: 'floorPlan', label: 'Floor Plan', color: '#1d1c1a', status: undefined as string | undefined },
-            ...(layerDefinitions ?? []).map((def) => ({
-              id: def.id,
-              label: def.label,
-              color: def.color ?? '#475569',
-              status: layerStatuses[def.id]?.status as string | undefined,
-            })),
-          ]).map(({ id, label, color, status }) => {
-            const active = id === 'floorPlan'
-              ? (visibleLayers?.floorPlan ?? true)
-              : (visibleLayers?.[id] ?? false);
+          {((layerDefinitions ?? []).map((def) => ({
+            id: def.id,
+            label: def.label,
+            color: def.color ?? '#475569',
+            status: layerStatuses[def.id]?.status as string | undefined,
+          }))).map(({ id, label, color, status }) => {
+            const active = visibleLayers?.[id] ?? false;
             return (
               <button
                 key={id}

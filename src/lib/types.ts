@@ -97,6 +97,78 @@ export type SpaceRelativePosition = {
 export type LayerPosition = XY | SpaceRelativePosition;
 
 // ---------------------------------------------------------------------------
+// External visual control system
+// ---------------------------------------------------------------------------
+
+export type IconTextSpec = {
+  kind: 'text';
+  text: string;
+};
+
+export type IconSvgPathSpec = {
+  kind: 'svg-path';
+  path: string;
+  width?: number;
+  height?: number;
+  viewBoxWidth?: number;
+  viewBoxHeight?: number;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+};
+
+export type IconImageSpec = {
+  kind: 'image';
+  url: string;
+  width?: number;
+  height?: number;
+};
+
+export type IconSpec = IconTextSpec | IconSvgPathSpec | IconImageSpec;
+
+export type RotationControl = {
+  /** If provided, this value wins over animation velocity. */
+  angleDegrees?: number;
+  /** Optional angular velocity used for animation. */
+  velocityDegreesPerSecond?: number;
+  /** Offset applied when velocity-based rotation is active. */
+  baseDegrees?: number;
+  /** Epoch used for velocity-based animation. Defaults to 0. */
+  startTimeMs?: number;
+};
+
+export type SpaceVisualOverride = {
+  fill?: string;
+  fillHover?: string;
+  fillSelected?: string;
+  stroke?: string;
+  labelColor?: string;
+  iconColor?: string;
+  icon?: string | IconSpec;
+};
+
+export type AssetVisualOverride = {
+  fill?: string;
+  stroke?: string;
+  labelColor?: string;
+  iconColor?: string;
+  icon?: string | IconSpec;
+  radius?: number;
+  rotation?: RotationControl;
+};
+
+export type VisualControlState = {
+  classes?: {
+    spaces?: Record<string, SpaceVisualOverride>;
+    assets?: Record<string, AssetVisualOverride>;
+  };
+  spaces?: Record<Id, SpaceVisualOverride>;
+  assets?: Record<Id, AssetVisualOverride>;
+  /** Optional externally-supplied animation clock, in ms. */
+  animationClockMs?: number;
+};
+
+// ---------------------------------------------------------------------------
 // External layer system
 // ---------------------------------------------------------------------------
 

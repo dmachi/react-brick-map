@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
-import type { AssetEntity, LayerData, LayerDefinition, LayerQueryContext, XY } from './types';
+import { Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Text } from 'react-konva';
+import type { AssetEntity, IconSpec, LayerData, LayerQueryContext, XY } from './types';
 import { createRdfStore, selectRdfStore } from './rdfStore';
 import type { BuildingMapProps } from './BuildingMap';
 import {
@@ -9,6 +9,14 @@ import {
   resolveSpaceStyle,
   resolveTheme,
 } from './themeUtils';
+import {
+  collectVisualControlImageUrls,
+  getIconText,
+  hasVelocityRotation,
+  isImageIcon,
+  resolveAssetVisual,
+  resolveSpaceVisual,
+} from './visualControls';
 import {
   isDoorAsset,
   isFloorPlanAsset,
@@ -126,9 +134,16 @@ export function OrthoBuilding({
   onLayerToggle,
   theme,
   themeOverrides,
+  visualControls,
+  controls,
+  zoomToSelection = true,
   showControls = false,
 }: OrthoBuildingProps) {
-  const floorPlanVisible = visibleLayers?.floorPlan ?? true;
+  const controlsEnabled = controls?.enabled ?? true;
+  const showZoomToFitControl = controlsEnabled && (controls?.zoomToFit ?? showControls);
+  const showFullScreenControl = controlsEnabled && (controls?.fullScreen ?? showControls);
+  const showLayerPanelControl = controlsEnabled && (controls?.layerPanel ?? Boolean(onLayerToggle));
+  const showCompassControl = controlsEnabled && (controls?.compass ?? true);
   const activeRdfStore = useMemo(() => rdfStore ?? createRdfStore(), [rdfStore]);
   const graphStatementCount = activeRdfStore.statements.length;
   const [isExpanded, setIsExpanded] = useState(false);
@@ -148,10 +163,65 @@ export function OrthoBuilding({
     () => resolveTheme(theme, themeOverrides),
     [theme, themeOverrides],
   );
+  const [internalAnimationClockMs, setInternalAnimationClockMs] = useState(() => Date.now());
+  const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement>>({});
+  const imageUrls = useMemo(
+    () => collectVisualControlImageUrls(visualControls),
+    [visualControls],
+  );
+  const hasInternalAnimation = useMemo(
+    () => hasVelocityRotation(visualControls) && visualControls?.animationClockMs === undefined,
+    [visualControls],
+  );
+  const renderClockMs = visualControls?.animationClockMs ?? internalAnimationClockMs;
 
   useEffect(() => {
     viewportChangeRef.current = onViewportChange;
   }, [onViewportChange]);
+
+  useEffect(() => {
+    if (!hasInternalAnimation) {
+      return;
+    }
+
+    let frame = 0;
+    const tick = () => {
+      setInternalAnimationClockMs(Date.now());
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [hasInternalAnimation]);
+
+  useEffect(() => {
+    if (imageUrls.length === 0 || typeof window === 'undefined') {
+      return;
+    }
+
+    let cancelled = false;
+    const pending: HTMLImageElement[] = [];
+    for (const url of imageUrls) {
+      if (!url || iconImages[url]) {
+        continue;
+      }
+      const image = new window.Image();
+      pending.push(image);
+      image.onload = () => {
+        if (cancelled) {
+          return;
+        }
+        setIconImages((prev) => (prev[url] ? prev : { ...prev, [url]: image }));
+      };
+      image.src = url;
+    }
+
+    return () => {
+      cancelled = true;
+      for (const image of pending) {
+        image.onload = null;
+      }
+    };
+  }, [iconImages, imageUrls]);
 
   // Invalidate layer cache when the RDF store changes.
   useEffect(() => {
@@ -306,6 +376,53 @@ export function OrthoBuilding({
     viewportChangeRef.current?.(next);
   }, [transform.offsetX, transform.offsetY, transform.scale, resetToken]);
 
+  useEffect(() => {
+    if (!zoomToSelection) {
+      return;
+    }
+
+    if (!selectedSpaceId) {
+      updateViewport({
+        x: transform.offsetX,
+        y: transform.offsetY,
+        scale: transform.scale,
+      });
+      return;
+    }
+
+    const space = model.spaces.find((s) => s.id === selectedSpaceId);
+    if (!space) {
+      return;
+    }
+
+    const ring =
+      space.geometry.type === 'Polygon'
+        ? (space.geometry.rings[0] ?? [])
+        : (space.geometry.polygons[0]?.[0] ?? []);
+    if (ring.length === 0) {
+      return;
+    }
+
+    const projectedRing = projectRingTopFace(ring, DEFAULT_ORTHO_DEPTH, undefined, projectionContext);
+    const xs = projectedRing.map((p) => p.x);
+    const ys = projectedRing.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const dataWidth = Math.max(1, maxX - minX);
+    const dataHeight = Math.max(1, maxY - minY);
+    const selectionPadding = padding * 3;
+    const newScale = Math.min(
+      (mapWidth - selectionPadding * 2) / dataWidth,
+      (mapHeight - selectionPadding * 2) / dataHeight,
+    );
+    const newX = selectionPadding - minX * newScale + (mapWidth - selectionPadding * 2 - dataWidth * newScale) / 2;
+    const newY = selectionPadding - minY * newScale + (mapHeight - selectionPadding * 2 - dataHeight * newScale) / 2;
+    updateViewport({ x: newX, y: newY, scale: newScale });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSpaceId, zoomToSelection]);
+
   function updateViewport(next: { x: number; y: number; scale: number }) {
     setViewport(next);
     viewportChangeRef.current?.(next);
@@ -344,6 +461,71 @@ export function OrthoBuilding({
     updateViewport(next);
   }
 
+  function renderIconAt(
+    icon: IconSpec | undefined,
+    x: number,
+    y: number,
+    scale: number,
+    fallbackColor: string,
+  ) {
+    if (!icon) {
+      return null;
+    }
+
+    if (icon.kind === 'text') {
+      return (
+        <Text
+          x={x}
+          y={y}
+          text={icon.text}
+          fontSize={6 / scale}
+          fill={fallbackColor}
+          offsetX={2 / scale}
+          offsetY={2 / scale}
+        />
+      );
+    }
+
+    if (icon.kind === 'svg-path') {
+      const widthPx = (icon.width ?? 10) / scale;
+      const heightPx = (icon.height ?? 10) / scale;
+      const viewBoxWidth = icon.viewBoxWidth ?? 24;
+      const viewBoxHeight = icon.viewBoxHeight ?? 24;
+      return (
+        <Path
+          data={icon.path}
+          x={x - widthPx / 2}
+          y={y - heightPx / 2}
+          scaleX={widthPx / viewBoxWidth}
+          scaleY={heightPx / viewBoxHeight}
+          fill={icon.fill ?? fallbackColor}
+          stroke={icon.stroke}
+          strokeWidth={icon.strokeWidth != null ? icon.strokeWidth / scale : undefined}
+        />
+      );
+    }
+
+    if (isImageIcon(icon)) {
+      const image = iconImages[icon.url];
+      if (!image) {
+        return null;
+      }
+      const widthPx = (icon.width ?? 14) / scale;
+      const heightPx = (icon.height ?? 14) / scale;
+      return (
+        <KonvaImage
+          image={image}
+          x={x - widthPx / 2}
+          y={y - heightPx / 2}
+          width={widthPx}
+          height={heightPx}
+        />
+      );
+    }
+
+    return null;
+  }
+
   const overflowScale = Math.max(1, viewport.scale / Math.max(transform.scale, 0.0001));
   const stageWidth = Math.max(mapWidth, Math.round(mapWidth * overflowScale));
   const stageHeight = Math.max(mapHeight, Math.round(mapHeight * overflowScale));
@@ -376,10 +558,11 @@ export function OrthoBuilding({
         }
 
         const style = resolveSpaceStyle(resolvedTheme, space);
+        const visualStyle = resolveSpaceVisual(space, style, visualControls);
         const isSelected = selectedSpaceId === space.id;
         const isHovered = hoveredSpaceId === space.id;
-        const fill = isSelected ? style.fillSelected : isHovered ? style.fillHover : style.fill;
-        const typeLabel = formatBrickTypeLabel(space.brickClass) ?? style.icon;
+        const fill = isSelected ? visualStyle.fillSelected : isHovered ? visualStyle.fillHover : visualStyle.fill;
+        const typeLabel = getIconText(visualStyle.iconSpec) ?? formatBrickTypeLabel(space.brickClass) ?? visualStyle.icon;
 
         const topRing = projectRingTopFace(ring, DEFAULT_ORTHO_DEPTH, undefined, projectionContext);
         const walls = buildExtrudedWallQuads(ring, DEFAULT_ORTHO_DEPTH, undefined, projectionContext);
@@ -407,6 +590,7 @@ export function OrthoBuilding({
           space,
           ring,
           style,
+          visualStyle,
           fill,
           typeLabel,
           isSelected,
@@ -444,7 +628,7 @@ export function OrthoBuilding({
           : {}),
       }}
     >
-      {showControls ? (
+      {showZoomToFitControl || showFullScreenControl ? (
         <div
           style={{
             position: 'absolute',
@@ -456,39 +640,43 @@ export function OrthoBuilding({
             gap: 8,
           }}
         >
-          <button
-            type="button"
-            onClick={resetViewport}
-            style={{
-              border: '1px solid rgba(15,23,42,0.35)',
-              borderRadius: 8,
-              background: 'rgba(255, 255, 255, 0.9)',
-              color: '#0f172a',
-              fontSize: 12,
-              fontWeight: 600,
-              padding: '6px 9px',
-              cursor: 'pointer',
-            }}
-          >
-            Zoom to Fit
-          </button>
+          {showZoomToFitControl ? (
+            <button
+              type="button"
+              onClick={resetViewport}
+              style={{
+                border: '1px solid rgba(15,23,42,0.35)',
+                borderRadius: 8,
+                background: 'rgba(255, 255, 255, 0.9)',
+                color: '#0f172a',
+                fontSize: 12,
+                fontWeight: 600,
+                padding: '6px 9px',
+                cursor: 'pointer',
+              }}
+            >
+              Zoom to Fit
+            </button>
+          ) : null}
 
-          <button
-            type="button"
-            onClick={() => setIsExpanded((value) => !value)}
-            style={{
-              border: '1px solid rgba(15,23,42,0.35)',
-              borderRadius: 8,
-              background: 'rgba(255, 255, 255, 0.9)',
-              color: '#0f172a',
-              fontSize: 12,
-              fontWeight: 600,
-              padding: '6px 9px',
-              cursor: 'pointer',
-            }}
-          >
-            {isExpanded ? 'Exit Full Screen' : 'Full Screen'}
-          </button>
+          {showFullScreenControl ? (
+            <button
+              type="button"
+              onClick={() => setIsExpanded((value) => !value)}
+              style={{
+                border: '1px solid rgba(15,23,42,0.35)',
+                borderRadius: 8,
+                background: 'rgba(255, 255, 255, 0.9)',
+                color: '#0f172a',
+                fontSize: 12,
+                fontWeight: 600,
+                padding: '6px 9px',
+                cursor: 'pointer',
+              }}
+            >
+              {isExpanded ? 'Exit Full Screen' : 'Full Screen'}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -533,7 +721,7 @@ export function OrthoBuilding({
             ) : null}
 
             {/* Pass 1: floor fills — back to front */}
-            {floorPlanVisible && projectedSpaces.map((entry) => (
+            {projectedSpaces.map((entry) => (
               <Line
                 key={`floor-${entry.space.id}`}
                 points={flattenRing(entry.ring)}
@@ -622,7 +810,7 @@ export function OrthoBuilding({
             ])}
 
             {/* Passes 2–5: wall faces, edge lines, wall caps */}
-            {floorPlanVisible && (() => {
+            {(() => {
               const wallStroke = '#4b5563';
               const wallCap = '#d8dde3';
               const wallCapThickness = 0.22;
@@ -778,7 +966,7 @@ export function OrthoBuilding({
             ])}
 
             {/* Pass 6: labels */}
-            {floorPlanVisible && projectedSpaces.map((entry) => (
+            {projectedSpaces.map((entry) => (
               <Group key={`label-${entry.space.id}`} listening={false}>
                 {entry.typeLabel ? (
                   <Text
@@ -786,7 +974,7 @@ export function OrthoBuilding({
                     y={entry.centroid.y - 9 / viewport.scale}
                     text={entry.typeLabel}
                     fontSize={8 / viewport.scale}
-                    fill={entry.style.iconColor ?? entry.style.labelColor}
+                    fill={entry.visualStyle.iconColor ?? entry.visualStyle.labelColor}
                     offsetX={(entry.typeLabel.length * 2.2) / viewport.scale}
                     offsetY={3 / viewport.scale}
                   />
@@ -796,15 +984,16 @@ export function OrthoBuilding({
                   y={entry.centroid.y}
                   text={entry.space.label}
                   fontSize={12 / viewport.scale}
-                  fill={entry.style.labelColor}
+                  fill={entry.visualStyle.labelColor}
                   offsetX={(entry.space.label.length * 3) / viewport.scale}
                   offsetY={6 / viewport.scale}
                 />
               </Group>
             ))}
 
-            {floorPlanVisible && model.assets.filter(isFloorPlanAsset).map((asset) => {
-              const assetStyle = resolveAssetStyle(resolvedTheme, asset);
+            {model.assets.filter(isFloorPlanAsset).map((asset) => {
+              const baseAssetStyle = resolveAssetStyle(resolvedTheme, asset);
+              const assetStyle = resolveAssetVisual(asset, baseAssetStyle, visualControls, renderClockMs);
               const iconPoint = projectPlanPointFromCenter(asset.position, projectionContext);
               const doorAsset = isDoorAsset(asset);
               const windowAsset = isWindowAsset(asset);
@@ -826,6 +1015,9 @@ export function OrthoBuilding({
               return (
                 <Group
                   key={asset.id}
+                  x={iconPoint.x}
+                  y={iconPoint.y}
+                  rotation={assetStyle.rotationDegrees}
                   onClick={() => onAssetClick?.(asset)}
                   onMouseEnter={updateHoverFromEvent}
                   onMouseMove={updateHoverFromEvent}
@@ -834,10 +1026,10 @@ export function OrthoBuilding({
                   {doorAsset || windowAsset ? (
                     <Line
                       points={[
-                        iconPoint.x - 0.55,
-                        iconPoint.y,
-                        iconPoint.x + 0.55,
-                        iconPoint.y,
+                        -0.55,
+                        0,
+                        0.55,
+                        0,
                       ]}
                       stroke={assetStyle.stroke}
                       strokeWidth={(doorAsset ? 2.5 : 2) / viewport.scale}
@@ -846,31 +1038,27 @@ export function OrthoBuilding({
                   ) : (
                     <>
                       <Circle
-                        x={iconPoint.x}
-                        y={iconPoint.y}
+                        x={0}
+                        y={0}
                         radius={assetStyle.radius / viewport.scale}
                         fill={assetStyle.fill}
                         stroke={assetStyle.stroke}
                         strokeWidth={1 / viewport.scale}
                       />
-                      {assetStyle.icon ? (
-                        <Text
-                          x={iconPoint.x}
-                          y={iconPoint.y}
-                          text={assetStyle.icon}
-                          fontSize={6 / viewport.scale}
-                          fill={assetStyle.iconColor ?? assetStyle.labelColor}
-                          offsetX={2 / viewport.scale}
-                          offsetY={2 / viewport.scale}
-                        />
-                      ) : null}
+                      {renderIconAt(
+                        assetStyle.iconSpec,
+                        0,
+                        0,
+                        viewport.scale,
+                        assetStyle.iconColor ?? assetStyle.labelColor,
+                      )}
                     </>
                   )}
                 </Group>
               );
             })}
 
-            {floorPlanVisible && model.annotations.map((annotation) => {
+            {model.annotations.map((annotation) => {
               const anchor = findAnchorForAnnotation(annotation, model);
               const orthoAnchor = projectPlanPointFromCenter(anchor, projectionContext);
               return (
@@ -983,35 +1171,37 @@ export function OrthoBuilding({
         </Stage>
       ) : null}
 
-      <div
-        style={{
-          position: 'absolute',
-          right: 10,
-          top: 10,
-          width: 44,
-          height: 44,
-          borderRadius: 999,
-          border: '1px solid rgba(15, 23, 42, 0.35)',
-          background: 'rgba(255, 255, 255, 0.82)',
-          display: 'grid',
-          placeItems: 'center',
-          pointerEvents: 'none',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
-          zIndex: 5,
-        }}
-        aria-hidden="true"
-      >
-        <svg width="34" height="34" viewBox="0 0 34 34" role="img" aria-label="North compass">
-          <circle cx="17" cy="17" r="15" fill="none" stroke="rgba(15,23,42,0.25)" strokeWidth="1" />
-          <g transform={`rotate(${northDirectionDegrees} 17 17)`}>
-            <line x1="17" y1="24" x2="17" y2="9" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
-            <polygon points="17,6 13.5,11 20.5,11" fill="#0f172a" />
-          </g>
-          <text x="17" y="31" textAnchor="middle" fontSize="8" fill="#0f172a" fontWeight="700">N</text>
-        </svg>
-      </div>
+      {showCompassControl ? (
+        <div
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: 10,
+            width: 44,
+            height: 44,
+            borderRadius: 999,
+            border: '1px solid rgba(15, 23, 42, 0.35)',
+            background: 'rgba(255, 255, 255, 0.82)',
+            display: 'grid',
+            placeItems: 'center',
+            pointerEvents: 'none',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+            zIndex: 5,
+          }}
+          aria-hidden="true"
+        >
+          <svg width="34" height="34" viewBox="0 0 34 34" role="img" aria-label="North compass">
+            <circle cx="17" cy="17" r="15" fill="none" stroke="rgba(15,23,42,0.25)" strokeWidth="1" />
+            <g transform={`rotate(${northDirectionDegrees} 17 17)`}>
+              <line x1="17" y1="24" x2="17" y2="9" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+              <polygon points="17,6 13.5,11 20.5,11" fill="#0f172a" />
+            </g>
+            <text x="17" y="31" textAnchor="middle" fontSize="8" fill="#0f172a" fontWeight="700">N</text>
+          </svg>
+        </div>
+      ) : null}
 
-      {onLayerToggle ? (
+      {onLayerToggle && showLayerPanelControl ? (
         <div
           style={{
             position: 'absolute',
@@ -1034,16 +1224,13 @@ export function OrthoBuilding({
           <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: '#64748b', textTransform: 'uppercase', marginBottom: 2 }}>
             Layers
           </span>
-          {([
-            { id: 'floorPlan', label: 'Floor Plan', color: '#1d1c1a', status: undefined as string | undefined },
-            ...(layerDefinitions ?? []).map((def) => ({
-              id: def.id,
-              label: def.label,
-              color: def.color ?? '#475569',
-              status: layerStatuses[def.id]?.status as string | undefined,
-            })),
-          ]).map(({ id, label, color, status }) => {
-            const active = id === 'floorPlan' ? (visibleLayers?.floorPlan ?? true) : (visibleLayers?.[id] ?? false);
+          {((layerDefinitions ?? []).map((def) => ({
+            id: def.id,
+            label: def.label,
+            color: def.color ?? '#475569',
+            status: layerStatuses[def.id]?.status as string | undefined,
+          }))).map(({ id, label, color, status }) => {
+            const active = visibleLayers?.[id] ?? false;
             return (
               <button
                 key={id}

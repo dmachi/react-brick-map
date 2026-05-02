@@ -32,7 +32,6 @@ function App() {
   const [turtleUrl, setTurtleUrl] = useState('https://brickschema.org/ttl/mortar/bldg1.ttl');
   const [mapSize, setMapSize] = useState({ width: 960, height: 560 });
   const [visibleLayers, setVisibleLayers] = useState<Record<string, boolean>>({
-    floorPlan: true,
     sensors: true,
     hvac: true,
     roomMetrics: false,
@@ -326,7 +325,12 @@ function App() {
             model={parsed.model}
             width={mapSize.width}
             height={mapSize.height}
-            showControls
+            controls={{
+              enabled: true,
+              zoomToFit: true,
+              fullScreen: true,
+              layerPanel: true,
+            }}
             northDirectionDegrees={profile.northDirectionDegrees}
             selectedSpaceId={selectedSpaceId}
             resetToken={resetToken}
@@ -348,7 +352,12 @@ function App() {
             model={parsed.model}
             width={mapSize.width}
             height={mapSize.height}
-            showControls
+            controls={{
+              enabled: true,
+              zoomToFit: true,
+              fullScreen: true,
+              layerPanel: true,
+            }}
             northDirectionDegrees={profile.northDirectionDegrees}
             selectedSpaceId={selectedSpaceId}
             resetToken={resetToken}
