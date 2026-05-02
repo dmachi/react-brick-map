@@ -169,9 +169,11 @@ function extractBrickRecSourceFromJsonLd(
       }
       seenSpaces.add(id);
 
+      const { label, hasExplicitLabel } = getLabelWithExplicitFlag(node, nodeIndex, 'Unnamed Space');
       spaces.push({
         id,
-        label: getLabel(node, nodeIndex, 'Unnamed Space'),
+        label,
+        hasExplicitLabel,
         brickClass: getPrimaryType(node),
         parentId: extractParentId(node, nodeIndex, parentByChild),
         geometry: extractPolygonalGeometry(node, nodeIndex),
@@ -650,6 +652,33 @@ function getLabel(node: JsonLdNode | undefined, nodeIndex: Map<string, JsonLdNod
   return toLocalId(getNodeId(node), fallback);
 }
 
+function getLabelWithExplicitFlag(
+  node: JsonLdNode | undefined,
+  nodeIndex: Map<string, JsonLdNode>,
+  fallback: string,
+): { label: string; hasExplicitLabel: boolean } {
+  if (!node) {
+    return { label: fallback, hasExplicitLabel: false };
+  }
+
+  const directLabel = getValuesForKeys(node, [`${SKOS_NS}prefLabel`, `${RDFS_NS}label`])
+    .map((value) => getLiteralString(value))
+    .find((value): value is string => Boolean(value && value.trim()));
+  if (directLabel) {
+    return { label: directLabel, hasExplicitLabel: true };
+  }
+
+  const refLabelNode = getFirstNodeByReference(nodeIndex, getValuesForKeys(node, [`${SKOS_NS}prefLabel`, `${RDFS_NS}label`]));
+  if (refLabelNode) {
+    const resolved = getLabelWithExplicitFlag(refLabelNode, nodeIndex, fallback);
+    if (resolved.label !== fallback) {
+      return resolved;
+    }
+  }
+
+  return { label: toLocalId(getNodeId(node), fallback), hasExplicitLabel: false };
+}
+
 function isSpaceLike(node: JsonLdNode): boolean {
   if (isAssetLike(node)) {
     return false;
@@ -1103,6 +1132,20 @@ function extractBrickRecSource(store: Store, buildingId: string): BrickRecSource
     return subject.value.split(/[#/]/).pop() || subject.value;
   };
 
+  // Get label with explicit flag for a subject
+  const getLabelWithExplicitFlag = (subject: any): { label: string; hasExplicitLabel: boolean } => {
+    const prefLabelQuads = matchToArray(subject, prefLabel, null);
+    if (prefLabelQuads.length > 0) {
+      return { label: prefLabelQuads[0].object.value, hasExplicitLabel: true };
+    }
+    const labelQuads = matchToArray(subject, label, null);
+    if (labelQuads.length > 0) {
+      return { label: labelQuads[0].object.value, hasExplicitLabel: true };
+    }
+    // Fallback to localName
+    return { label: subject.value.split(/[#/]/).pop() || subject.value, hasExplicitLabel: false };
+  };
+
   // Find all subjects with a given type
   const getByType = (typeUri: string) => {
     const typeNode = createNamedNode(typeUri);
@@ -1193,7 +1236,7 @@ function extractBrickRecSource(store: Store, buildingId: string): BrickRecSource
 
   const extractedSpaces: BrickRecSpaceSource[] = spaceSubjects.map((subject: any) => {
     const id = subject.value.split(/[#/]/).pop() || 'space-unknown';
-    const spaceLabel = getLabel(subject);
+    const { label: spaceLabel, hasExplicitLabel } = getLabelWithExplicitFlag(subject);
 
     let brickClass = BRICK + 'Space';
     const typeQuads = matchToArray(subject, rdfType, null);
@@ -1214,6 +1257,7 @@ function extractBrickRecSource(store: Store, buildingId: string): BrickRecSource
     return {
       id,
       label: spaceLabel,
+      hasExplicitLabel,
       brickClass,
       geometry,
     };

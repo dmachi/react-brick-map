@@ -25,6 +25,8 @@ export type Geometry = PolygonGeometry | MultiPolygonGeometry;
 export type SpaceEntity = {
   id: Id;
   label: string;
+  /** Whether the label is explicit from the data or auto-generated from the ID. */
+  hasExplicitLabel?: boolean;
   brickClass?: string;
   levelId?: string;
   geometry: Geometry;
@@ -163,6 +165,11 @@ export type AssetVisualOverride = {
   rotation?: RotationControl;
 };
 
+export type LabelOptions = {
+  /** Show room type label when there is no room label. Defaults to false. */
+  showRoomTypeWhenNoLabel?: boolean;
+};
+
 export type VisualControlState = {
   classes?: {
     spaces?: Record<string, SpaceVisualOverride>;
@@ -172,6 +179,8 @@ export type VisualControlState = {
   assets?: Record<Id, AssetVisualOverride>;
   /** Optional externally-supplied animation clock, in ms. */
   animationClockMs?: number;
+  /** Label rendering options. */
+  labelOptions?: LabelOptions;
 };
 
 // ---------------------------------------------------------------------------

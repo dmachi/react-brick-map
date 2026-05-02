@@ -36,6 +36,7 @@ export type BrickRecSpaceSource = {
   volume?: number;
   id: string;
   label: string;
+  hasExplicitLabel?: boolean;
   brickClass?: string;
   levelId?: string;
   parentId?: string;
@@ -386,6 +387,7 @@ function toSpaceEntity(
     return {
       id: source.id,
       label: source.label,
+      hasExplicitLabel: source.hasExplicitLabel,
       brickClass: source.brickClass,
       levelId: source.levelId,
       metadata: buildSpaceMetadata(has3D, source.geometry.coordinates, source.volume),
@@ -404,6 +406,7 @@ function toSpaceEntity(
   return {
     id: source.id,
     label: source.label,
+    hasExplicitLabel: source.hasExplicitLabel,
     brickClass: source.brickClass,
     levelId: source.levelId,
     metadata: buildSpaceMetadata(has3D, source.geometry.coordinates, source.volume),

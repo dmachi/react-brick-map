@@ -1023,26 +1023,28 @@ export function OrthoBuilding({
             {/* Pass 6: labels */}
             {projectedSpaces.map((entry) => (
               <Group key={`label-${entry.space.id}`} listening={false}>
-                {entry.typeLabel ? (
+                {entry.typeLabel && !entry.space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
                   <Text
                     x={entry.centroid.x}
-                    y={entry.centroid.y - 9 / viewport.scale}
+                    y={entry.centroid.y}
                     text={entry.typeLabel}
                     fontSize={8 / viewport.scale}
                     fill={entry.visualStyle.iconColor ?? entry.visualStyle.labelColor}
                     offsetX={(entry.typeLabel.length * 2.2) / viewport.scale}
-                    offsetY={3 / viewport.scale}
+                    offsetY={4 / viewport.scale}
                   />
                 ) : null}
-                <Text
-                  x={entry.centroid.x}
-                  y={entry.centroid.y}
-                  text={entry.space.label}
-                  fontSize={12 / viewport.scale}
-                  fill={entry.visualStyle.labelColor}
-                  offsetX={(entry.space.label.length * 3) / viewport.scale}
-                  offsetY={6 / viewport.scale}
-                />
+                {entry.space.hasExplicitLabel ? (
+                  <Text
+                    x={entry.centroid.x}
+                    y={entry.centroid.y}
+                    text={entry.space.label}
+                    fontSize={12 / viewport.scale}
+                    fill={entry.visualStyle.labelColor}
+                    offsetX={(entry.space.label.length * 3) / viewport.scale}
+                    offsetY={6 / viewport.scale}
+                  />
+                ) : null}
               </Group>
             ))}
 

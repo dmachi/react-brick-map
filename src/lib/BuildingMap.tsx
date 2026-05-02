@@ -1238,26 +1238,28 @@ export function BuildingMap({
                       onMouseLeave={() => setHoveredSpaceId(null)}
                       onClick={() => onSpaceClick?.(space)}
                     />
-                    {spaceTypeLabel ? (
+                    {spaceTypeLabel && !space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
                       <Text
                         x={centroid.x}
-                        y={centroid.y - 9 / viewport.scale}
+                        y={centroid.y}
                         text={spaceTypeLabel}
                         fontSize={8 / viewport.scale}
                         fill={spaceStyle.iconColor ?? spaceStyle.labelColor}
                         offsetX={(spaceTypeLabel.length * 2.2) / viewport.scale}
-                        offsetY={3 / viewport.scale}
+                        offsetY={4 / viewport.scale}
                       />
                     ) : null}
-                    <Text
-                      x={centroid.x}
-                      y={centroid.y}
-                      text={space.label}
-                      fontSize={12 / viewport.scale}
-                      fill={spaceStyle.labelColor}
-                      offsetX={(space.label.length * 3) / viewport.scale}
-                      offsetY={6 / viewport.scale}
-                    />
+                    {space.hasExplicitLabel ? (
+                      <Text
+                        x={centroid.x}
+                        y={centroid.y}
+                        text={space.label}
+                        fontSize={12 / viewport.scale}
+                        fill={spaceStyle.labelColor}
+                        offsetX={(space.label.length * 3) / viewport.scale}
+                        offsetY={6 / viewport.scale}
+                      />
+                    ) : null}
                   </Group>
                 );
               }
