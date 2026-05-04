@@ -166,6 +166,9 @@ export function OrthoBuilding({
   const [hoveredSpaceId, setHoveredSpaceId] = useState<string | null>(null);
   const [hoveredAsset, setHoveredAsset] = useState<{ asset: AssetEntity; x: number; y: number } | null>(null);
   const [hoveredMarker, setHoveredMarker] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [isLayerPanelOpen, setIsLayerPanelOpen] = useState(false);
+  const [hoveredControlTooltip, setHoveredControlTooltip] = useState<string | null>(null);
+  const layerPanelCloseTimerRef = useRef<number | null>(null);
   const [layerStatuses, setLayerStatuses] = useState<Record<string, LayerStatus>>({});
   const viewportChangeRef = useRef(onViewportChange);
   const resolvedTheme = useMemo(
@@ -654,6 +657,61 @@ export function OrthoBuilding({
       .sort((left, right) => left.depthScore - right.depthScore);
   }, [hoveredSpaceId, model.spaces, projectionContext, resolvedTheme, selectedSpaceId]);
 
+  const controlButtonStyle: React.CSSProperties = {
+    width: 34,
+    height: 34,
+    border: '1px solid rgba(15,23,42,0.35)',
+    borderRadius: 8,
+    background: 'rgba(255, 255, 255, 0.9)',
+    color: '#0f172a',
+    display: 'grid',
+    placeItems: 'center',
+    padding: 0,
+    cursor: 'pointer',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+  };
+
+  const controlTooltipStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: 42,
+    top: 6,
+    padding: '4px 7px',
+    borderRadius: 6,
+    fontSize: 11,
+    lineHeight: 1.2,
+    color: '#e2e8f0',
+    background: 'rgba(15, 23, 42, 0.9)',
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+  };
+
+  const clearLayerPanelCloseTimer = () => {
+    if (layerPanelCloseTimerRef.current !== null) {
+      window.clearTimeout(layerPanelCloseTimerRef.current);
+      layerPanelCloseTimerRef.current = null;
+    }
+  };
+
+  const openLayerPanel = () => {
+    clearLayerPanelCloseTimer();
+    setIsLayerPanelOpen(true);
+  };
+
+  const closeLayerPanelWithDelay = () => {
+    clearLayerPanelCloseTimer();
+    layerPanelCloseTimerRef.current = window.setTimeout(() => {
+      setIsLayerPanelOpen(false);
+      layerPanelCloseTimerRef.current = null;
+    }, 140);
+  };
+
+  useEffect(() => {
+    return () => {
+      clearLayerPanelCloseTimer();
+    };
+  }, []);
+
   return (
     <div
       data-rdf-store-statements={graphStatementCount}
@@ -673,7 +731,7 @@ export function OrthoBuilding({
           : {}),
       }}
     >
-      {showZoomToFitControl || showFullScreenControl ? (
+      {showZoomToFitControl || showFullScreenControl || (onLayerToggle && showLayerPanelControl) ? (
         <div
           style={{
             position: 'absolute',
@@ -686,41 +744,169 @@ export function OrthoBuilding({
           }}
         >
           {showZoomToFitControl ? (
-            <button
-              type="button"
-              onClick={resetViewport}
-              style={{
-                border: '1px solid rgba(15,23,42,0.35)',
-                borderRadius: 8,
-                background: 'rgba(255, 255, 255, 0.9)',
-                color: '#0f172a',
-                fontSize: 12,
-                fontWeight: 600,
-                padding: '6px 9px',
-                cursor: 'pointer',
-              }}
-            >
-              Zoom to Fit
-            </button>
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={resetViewport}
+                style={controlButtonStyle}
+                aria-label="Zoom to fit"
+                title="Zoom to fit"
+                onMouseEnter={() => setHoveredControlTooltip('Zoom to fit')}
+                onMouseLeave={() => setHoveredControlTooltip(null)}
+                onFocus={() => setHoveredControlTooltip('Zoom to fit')}
+                onBlur={() => setHoveredControlTooltip(null)}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M9 9l-3-3M15 9l3-3M9 15l-3 3M15 15l3 3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {hoveredControlTooltip === 'Zoom to fit' ? <span style={controlTooltipStyle}>Zoom to fit</span> : null}
+            </div>
           ) : null}
 
           {showFullScreenControl ? (
-            <button
-              type="button"
-              onClick={() => setIsExpanded((value) => !value)}
-              style={{
-                border: '1px solid rgba(15,23,42,0.35)',
-                borderRadius: 8,
-                background: 'rgba(255, 255, 255, 0.9)',
-                color: '#0f172a',
-                fontSize: 12,
-                fontWeight: 600,
-                padding: '6px 9px',
-                cursor: 'pointer',
-              }}
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setIsExpanded((value) => !value)}
+                style={controlButtonStyle}
+                aria-label={isExpanded ? 'Exit full screen' : 'Enter full screen'}
+                title={isExpanded ? 'Exit full screen' : 'Enter full screen'}
+                onMouseEnter={() => setHoveredControlTooltip(isExpanded ? 'Exit full screen' : 'Enter full screen')}
+                onMouseLeave={() => setHoveredControlTooltip(null)}
+                onFocus={() => setHoveredControlTooltip(isExpanded ? 'Exit full screen' : 'Enter full screen')}
+                onBlur={() => setHoveredControlTooltip(null)}
+              >
+                {isExpanded ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 9H4V4M15 9h5V4M9 15H4v5M15 15h5v5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+              {hoveredControlTooltip === (isExpanded ? 'Exit full screen' : 'Enter full screen') ? (
+                <span style={controlTooltipStyle}>{isExpanded ? 'Exit full screen' : 'Enter full screen'}</span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {onLayerToggle && showLayerPanelControl ? (
+            <div
+              style={{ position: 'relative' }}
+              onMouseEnter={openLayerPanel}
+              onMouseLeave={closeLayerPanelWithDelay}
             >
-              {isExpanded ? 'Exit Full Screen' : 'Full Screen'}
-            </button>
+              <button
+                type="button"
+                style={controlButtonStyle}
+                aria-label="Layer selection"
+                title="Layer selection"
+                onMouseEnter={() => {
+                  setHoveredControlTooltip('Layer selection');
+                  openLayerPanel();
+                }}
+                onMouseLeave={() => setHoveredControlTooltip(null)}
+                onFocus={() => {
+                  setHoveredControlTooltip('Layer selection');
+                  openLayerPanel();
+                }}
+                onBlur={() => {
+                  setHoveredControlTooltip(null);
+                  closeLayerPanelWithDelay();
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 4 3 8l9 4 9-4-9-4ZM3 12l9 4 9-4M3 16l9 4 9-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {hoveredControlTooltip === 'Layer selection' ? <span style={controlTooltipStyle}>Layer selection</span> : null}
+
+              {isLayerPanelOpen ? (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 36,
+                    top: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    padding: '6px 8px',
+                    borderRadius: 8,
+                    border: '1px solid rgba(15, 23, 42, 0.18)',
+                    background: 'rgba(255, 255, 255, 0.94)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.10)',
+                    userSelect: 'none',
+                    minWidth: 160,
+                  }}
+                  role="group"
+                  aria-label="Map layers"
+                  onMouseEnter={openLayerPanel}
+                  onMouseLeave={closeLayerPanelWithDelay}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: -8,
+                      top: 0,
+                      width: 8,
+                      height: 34,
+                    }}
+                    aria-hidden="true"
+                  />
+                  <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: '#64748b', textTransform: 'uppercase', marginBottom: 2 }}>
+                    Layers
+                  </span>
+                  {((layerDefinitions ?? []).map((def) => ({
+                    id: def.id,
+                    label: def.label,
+                    color: def.color ?? '#475569',
+                    status: layerStatuses[def.id]?.status as string | undefined,
+                  }))).map(({ id, label, color, status }) => {
+                    const active = visibleLayers?.[id] ?? false;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => onLayerToggle(id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '3px 6px',
+                          borderRadius: 5,
+                          border: `1px solid ${active ? color : 'rgba(15,23,42,0.15)'}`,
+                          background: active ? `${color}18` : 'transparent',
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          fontWeight: active ? 600 : 400,
+                          color: active ? color : '#94a3b8',
+                          transition: 'all 0.12s ease',
+                          whiteSpace: 'nowrap',
+                        }}
+                        aria-pressed={active}
+                      >
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 2,
+                            background: active ? color : 'rgba(15,23,42,0.15)',
+                            flexShrink: 0,
+                            transition: 'background 0.12s ease',
+                          }}
+                        />
+                        {label}
+                        {status === 'loading' ? ' ...' : status === 'error' ? ' !' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -1258,74 +1444,7 @@ export function OrthoBuilding({
         </div>
       ) : null}
 
-      {onLayerToggle && showLayerPanelControl ? (
-        <div
-          style={{
-            position: 'absolute',
-            left: 10,
-            bottom: 10,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 4,
-            padding: '6px 8px',
-            borderRadius: 8,
-            border: '1px solid rgba(15, 23, 42, 0.18)',
-            background: 'rgba(255, 255, 255, 0.88)',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.10)',
-            zIndex: 5,
-            userSelect: 'none',
-          }}
-          role="group"
-          aria-label="Map layers"
-        >
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: '#64748b', textTransform: 'uppercase', marginBottom: 2 }}>
-            Layers
-          </span>
-          {((layerDefinitions ?? []).map((def) => ({
-            id: def.id,
-            label: def.label,
-            color: def.color ?? '#475569',
-            status: layerStatuses[def.id]?.status as string | undefined,
-          }))).map(({ id, label, color, status }) => {
-            const active = visibleLayers?.[id] ?? false;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => onLayerToggle(id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '3px 6px',
-                  borderRadius: 5,
-                  border: `1px solid ${active ? color : 'rgba(15,23,42,0.15)'}`,
-                  background: active ? `${color}18` : 'transparent',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  fontWeight: active ? 600 : 400,
-                  color: active ? color : '#94a3b8',
-                  transition: 'all 0.12s ease',
-                  whiteSpace: 'nowrap',
-                }}
-                aria-pressed={active}
-              >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 2,
-                    background: active ? color : 'rgba(15,23,42,0.15)',
-                    flexShrink: 0,
-                    transition: 'background 0.12s ease',
-                  }}
-                />
-                {label}{status === 'loading' ? ' …' : status === 'error' ? ' !' : ''}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+      {null}
     </div>
   );
 }
