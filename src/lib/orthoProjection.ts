@@ -2,7 +2,7 @@ import type { Ring, XY } from './types';
 
 export const DEFAULT_ORTHO_DEPTH = 3.0;
 export const DEFAULT_ORTHO_ANGLE_DEGREES = 15;
-export const DEFAULT_ORTHO_PERSPECTIVE_STRENGTH = 1.9;
+export const DEFAULT_ORTHO_PERSPECTIVE_STRENGTH = .8;
 
 export type OrthoProjectionContext = {
   center: XY;

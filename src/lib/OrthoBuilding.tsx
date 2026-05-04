@@ -148,10 +148,11 @@ export function OrthoBuilding({
   zoomToSelection = true,
   showControls = false,
 }: OrthoBuildingProps) {
+  const hasExternalLayers = Boolean(layerDefinitions?.length);
   const controlsEnabled = controls?.enabled ?? true;
   const showZoomToFitControl = controlsEnabled && (controls?.zoomToFit ?? showControls);
   const showFullScreenControl = controlsEnabled && (controls?.fullScreen ?? showControls);
-  const showLayerPanelControl = controlsEnabled && (controls?.layerPanel ?? Boolean(onLayerToggle));
+  const showLayerPanelControl = controlsEnabled && hasExternalLayers && (controls?.layerPanel ?? Boolean(onLayerToggle));
   const showCompassControl = controlsEnabled && (controls?.compass ?? true);
   const activeRdfStore = useMemo(() => rdfStore ?? createRdfStore(), [rdfStore]);
   const graphStatementCount = activeRdfStore.statements.length;
