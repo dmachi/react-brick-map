@@ -403,7 +403,7 @@ export function resolveLayerPosition(
 
     // Space not found — treat x/y as absolute fallback.
     const fallback = { x, y };
-    console.info('[layer-debug][resolveLayerPosition] space not found; using absolute fallback', {
+    console.warn('[BuildingMap] resolveLayerPosition: space not found for spaceId; falling back to absolute coordinates', {
       spaceId: pos.spaceId,
       fallback,
     });
@@ -415,4 +415,37 @@ export function resolveLayerPosition(
     resolved: absolute,
   });
   return absolute;
+}
+
+/**
+ * Clamp a resolved plan-coordinate point so that the icon's visual extents
+ * remain within the bounding box of the associated space.
+ *
+ * Only applies when `position` contains a `spaceId`. If the space cannot be
+ * found, or the icon already fits, the original point is returned unchanged.
+ *
+ * Half-extents are expressed in plan units by dividing the icon's pixel size
+ * by the current viewport scale. The caller should pass the maximum half-extent
+ * across all rendered elements (background shape + icon graphic).
+ */
+export function clampMarkerToSpaceBbox(
+  pt: XY,
+  position: LayerPosition,
+  model: CanonicalBuildingMapModel,
+  halfExtentX: number,
+  halfExtentY: number,
+): XY {
+  if (!('spaceId' in position)) {
+    return pt;
+  }
+  const space = model.spaces.find((s) => s.id === position.spaceId);
+  if (!space) {
+    return pt;
+  }
+  const ring = getPrimaryRing(space);
+  const bbox = computeBoundingBox(ring);
+
+  const clampedX = Math.max(bbox.minX + halfExtentX, Math.min(pt.x, bbox.maxX - halfExtentX));
+  const clampedY = Math.max(bbox.minY + halfExtentY, Math.min(pt.y, bbox.maxY - halfExtentY));
+  return { x: clampedX, y: clampedY };
 }

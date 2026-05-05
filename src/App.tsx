@@ -18,88 +18,53 @@ import {
   sampleBrickTurtle,
 } from './lib/sampleData.ts';
 
-function makeSpaceRelativeMarkerFixture(model: CanonicalBuildingMapModel): MarkerLayerItem[] {
-  const rooms = model.spaces.slice(0, 3);
-  return rooms.flatMap((space, roomIndex) => {
+const DEMO_ROOM_IDS = [
+  'urn:demo:space:ccspace-room-1',
+  'urn:demo:space:ccspace-room-2',
+  'urn:demo:space:ccspace-room-3',
+  'urn:demo:space:ccspace-room-4',
+];
+
+function makeRoomBottomRightIconMarkers(model: CanonicalBuildingMapModel): MarkerLayerItem[] {
+  const markers: MarkerLayerItem[] = [];
+  const iconSize = 30;
+
+  for (const spaceId of DEMO_ROOM_IDS) {
+    const space = model.spaces.find((s) => s.id === spaceId);
+    if (!space) {
+      continue;
+    }
+
     const ring = getPrimaryRing(space);
     const xs = ring.map((p) => p.x);
     const ys = ring.map((p) => p.y);
-    const minX = xs.length > 0 ? Math.min(...xs) : 0;
-    const maxX = xs.length > 0 ? Math.max(...xs) : 0;
-    const minY = ys.length > 0 ? Math.min(...ys) : 0;
-    const maxY = ys.length > 0 ? Math.max(...ys) : 0;
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
-    const centerLocal = { x: width * 0.5, y: height * 0.5 };
-    const boundaryLocal = { x: Math.max(0.2, width * 0.85), y: Math.max(0.2, height * 0.85) };
+    const width = xs.length > 1 ? Math.max(...xs) - Math.min(...xs) : 0;
+    const height = ys.length > 1 ? Math.max(...ys) - Math.min(...ys) : 0;
 
-    const exactSpaceId = space.id;
-    const centerPosition: { spaceId: string; x: number; y: number } = {
-      spaceId: exactSpaceId,
-      x: centerLocal.x,
-      y: centerLocal.y,
-    };
+    const offsetX = width * 0.85;
+    const offsetY = height * 0.85;
 
-    const boundaryPosition: { spaceId: string; x: number; y: number } = {
-      spaceId: exactSpaceId,
-      x: boundaryLocal.x,
-      y: boundaryLocal.y,
-    };
-
-    const imagePosition: { spaceId: string; x: number; y: number } = {
-      spaceId: exactSpaceId,
-      x: Math.max(0.8, width * 0.2),
-      y: Math.max(0.8, height * 0.2),
-    };
-
-    return [
-      {
-        id: `fixture-center-${roomIndex + 1}`,
-        position: centerPosition,
-        fill: '#1d4ed8',
-        stroke: '#bfdbfe',
-        radius: 5,
-        icon: 'C',
-        iconColor: '#dbeafe',
-        label: `${space.label} center`,
-        tooltip: `center marker\nspaceId=${centerPosition.spaceId}`,
+    markers.push({
+      id: `room-bottom-right-${space.id}`,
+      position: { spaceId: space.id, x: offsetX, y: offsetY },
+      fill: 'transparent',
+      stroke: 'transparent',
+      radius: 0,
+      icon: {
+        kind: 'svg-path',
+        path: 'M12 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm0 5c-2.67 0-8 1.34-8 4v1h16v-1c0-2.66-5.33-4-8-4z',
+        viewBoxWidth: 24,
+        viewBoxHeight: 24,
+        width: iconSize,
+        height: iconSize,
       },
-      {
-        id: `fixture-boundary-${roomIndex + 1}`,
-        position: boundaryPosition,
-        fill: '#7c2d12',
-        stroke: '#fdba74',
-        radius: 5,
-        icon: {
-          kind: 'svg-path',
-          path: 'M12 2 L20 12 L12 22 L4 12 Z',
-          viewBoxWidth: 24,
-          viewBoxHeight: 24,
-          width: 10,
-          height: 10,
-        },
-        iconColor: '#ffedd5',
-        label: `${space.label} boundary`,
-        tooltip: `boundary marker\nspaceId=${boundaryPosition.spaceId}`,
-      },
-      {
-        id: `fixture-image-${roomIndex + 1}`,
-        position: imagePosition,
-        fill: '#14532d',
-        stroke: '#86efac',
-        radius: 5,
-        icon: {
-          kind: 'image',
-          url: '/favicon.svg',
-          width: 12,
-          height: 12,
-        },
-        iconColor: '#dcfce7',
-        label: `${space.label} image`,
-        tooltip: `image marker\nspaceId=${imagePosition.spaceId}`,
-      },
-    ];
-  });
+      iconColor: '#1e3a8a',
+      label: space.label,
+      tooltip: `${space.label}\nspaceId=${space.id}`,
+    });
+  }
+
+  return markers;
 }
 
 function App() {
@@ -119,8 +84,7 @@ function App() {
     typeof window !== 'undefined' ? window.innerWidth > 1200 : false,
   );
   const [visibleLayers, setVisibleLayers] = useState<Record<string, boolean>>({
-    fixtureOverlay: true,
-    fixtureWalls: true,
+    roomCornerIcons: true,
     sensors: false,
     hvac: false,
     roomMetrics: false,
@@ -128,22 +92,19 @@ function App() {
 
   const layerDefinitions = useMemo<LayerDefinition[]>(() => [
     {
-      id: 'fixtureOverlay',
-      label: 'Fixture Markers Overlay',
-      color: '#1d4ed8',
+      id: 'roomCornerIcons',
+      label: 'Room Bottom-Right Icons',
+      color: '#1f2937',
       renderOrder: 'overlay',
-      getData: ({ model }) => ({
-        markers: makeSpaceRelativeMarkerFixture(model),
-      }),
-    },
-    {
-      id: 'fixtureWalls',
-      label: 'Fixture Markers Walls',
-      color: '#7c2d12',
-      renderOrder: 'walls',
-      getData: ({ model }) => ({
-        markers: makeSpaceRelativeMarkerFixture(model),
-      }),
+      getData: ({ model }) => {
+        const markers = makeRoomBottomRightIconMarkers(model);
+        console.log('[demo-room-icon] getData called', {
+          totalSpaces: model.spaces.length,
+          spaceIds: model.spaces.map((s) => s.id),
+          markersProduced: markers.length,
+        });
+        return { markers };
+      },
     },
     {
       id: 'sensors',

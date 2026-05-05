@@ -161,13 +161,37 @@ function extractBrickRecSourceFromJsonLd(
     }
   }
 
+  const TRACE_IDS = new Set([
+    'urn:demo:space:ccspace-room-1',
+    'urn:demo:space:ccspace-room-2',
+    'urn:demo:space:ccspace-room-3',
+    'urn:demo:space:ccspace-room-4',
+  ]);
+
   for (const node of graphNodes) {
+    const rawNodeId = getNodeId(node);
+    if (rawNodeId && TRACE_IDS.has(rawNodeId)) {
+      const geo = extractPolygonalGeometry(node, nodeIndex);
+      console.log('[space-trace] node found in graphNodes', {
+        id: rawNodeId,
+        isSpaceLike: isSpaceLike(node),
+        typeNames: getTypeNames(node),
+        hasGeometry: !!geo,
+        geometry: geo,
+      });
+    }
+
     if (isSpaceLike(node)) {
       const id = toCanonicalId(getNodeId(node), 'space-unknown');
       if (seenSpaces.has(id)) {
         continue;
       }
       seenSpaces.add(id);
+
+      const geometry = extractPolygonalGeometry(node, nodeIndex);
+      if (TRACE_IDS.has(id)) {
+        console.log('[space-trace] pushing space', { id, hasGeometry: !!geometry, geometry });
+      }
 
       const { label, hasExplicitLabel } = getLabelWithExplicitFlag(node, nodeIndex, 'Unnamed Space');
       spaces.push({
@@ -176,7 +200,7 @@ function extractBrickRecSourceFromJsonLd(
         hasExplicitLabel,
         brickClass: getPrimaryType(node),
         parentId: extractParentId(node, nodeIndex, parentByChild),
-        geometry: extractPolygonalGeometry(node, nodeIndex),
+        geometry,
         volume: extractBrickVolume(node, nodeIndex),
       });
       continue;
@@ -788,12 +812,14 @@ function toRawCoordinateRing(value: unknown): RawCoordinate[] | undefined {
   for (const point of value) {
     const coordinate = toRawCoordinate(point);
     if (!coordinate) {
-      return undefined;
+      // Skip malformed coordinates instead of rejecting entire ring
+      continue;
     }
     ring.push(coordinate);
   }
 
-  return ring;
+  // Return undefined only if ring ends up empty after filtering
+  return ring.length >= 2 ? ring : undefined;
 }
 
 function toRawCoordinateRings(value: unknown): RawCoordinate[][] | undefined {
@@ -832,12 +858,14 @@ function toRawCoordinatePolygons(value: unknown): RawCoordinate[][][] | undefine
   for (const polygonValue of value) {
     const polygon = toRawCoordinateRings(polygonValue);
     if (!polygon) {
-      return undefined;
+      // Skip malformed polygons instead of rejecting entire multipolygon
+      continue;
     }
     polygons.push(polygon);
   }
 
-  return polygons;
+  // Return undefined only if no valid polygons remain
+  return polygons.length > 0 ? polygons : undefined;
 }
 
 function toRawCoordinate(value: unknown): [number, number] | [number, number, number] | undefined {

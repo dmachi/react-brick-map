@@ -263,10 +263,10 @@ export function OrthoBuilding({
     };
   }, [iconImages, imageUrls]);
 
-  // Invalidate layer cache when the RDF store changes.
+  // Invalidate layer cache when the RDF store or model changes.
   useEffect(() => {
     setLayerStatuses({});
-  }, [graphStatementCount]);
+  }, [graphStatementCount, model]);
 
   // Fetch data for visible external layers that have no cached result.
   useEffect(() => {

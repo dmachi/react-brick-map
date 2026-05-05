@@ -7,13 +7,14 @@ import type {
   LayerData,
   LayerDefinition,
   LayerDataContext,
+  MarkerLayerItem,
   Ring,
   SpaceEntity,
   VisualControlState,
   XY,
 } from './types';
 import { createRdfStore, type RdfStore } from './rdfStore';
-import { buildAssetTooltip, getNumericAssetMetadata, resolveLayerPosition } from './geometryUtils';
+import { buildAssetTooltip, getNumericAssetMetadata, resolveLayerPosition, clampMarkerToSpaceBbox } from './geometryUtils';
 import {
   collectLayerImageUrls,
   collectVisualControlImageUrls,
@@ -400,6 +401,37 @@ function flattenRings(rings: Ring[]): number[] {
   return flattenRing(outer);
 }
 
+/**
+ * Compute the maximum half-extents (in plan units) of a marker's rendered
+ * footprint — the larger of the background shape and the icon graphic.
+ * Used to clamp space-relative markers so their outer edge stays inside
+ * the room bounding box.
+ *
+ * Only returns non-zero extents if there is a visible background shape.
+ * Icon extents are NOT included since icons are typically small relative
+ * to room size and are meant to be positioned precisely by the user.
+ */
+function markerHalfExtents(
+  item: MarkerLayerItem,
+  scale: number,
+): { hx: number; hy: number } {
+  const shape = item.shape ?? 'circle';
+  const r = (item.radius ?? 5) / scale;
+  const w = (item.width ?? (item.radius ?? 5) * 2) / scale;
+  const h = (item.height ?? (item.radius ?? 5) * 2) / scale;
+
+  // Only clamp if there's a visible background shape
+  const hasVisibleBackground = item.fill && item.fill !== 'transparent' && item.radius !== 0;
+  if (!hasVisibleBackground) {
+    return { hx: 0, hy: 0 };
+  }
+
+  const shapeHx = shape === 'circle' ? r : w / 2;
+  const shapeHy = shape === 'circle' ? r : h / 2;
+
+  return { hx: shapeHx, hy: shapeHy };
+}
+
 type WallFrame = {
   tx: number;
   ty: number;
@@ -756,10 +788,10 @@ export function BuildingMap({
     };
   }, [iconImages, imageUrls]);
 
-  // Invalidate layer cache when the RDF store changes.
+  // Invalidate layer cache when the RDF store or model changes.
   useEffect(() => {
     setLayerStatuses({});
-  }, [graphStatementCount]);
+  }, [graphStatementCount, model]);
 
   // Fetch data for visible external layers that have no cached result.
   useEffect(() => {
@@ -1297,7 +1329,11 @@ export function BuildingMap({
                 ));
               }),
               ...(data.markers ?? []).map((item) => {
-                const pt = resolveLayerPosition(item.position, model);
+                const { hx, hy } = markerHalfExtents(item, viewport.scale);
+                const pt = clampMarkerToSpaceBbox(
+                  resolveLayerPosition(item.position, model),
+                  item.position, model, hx, hy,
+                );
                 const r = (item.radius ?? 5) / viewport.scale;
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
@@ -1328,6 +1364,18 @@ export function BuildingMap({
                       item.iconColor ?? '#f8fafc',
                       iconImages,
                     )}
+                    {item.label ? (
+                      <Text
+                        x={pt.x}
+                        y={pt.y + (r + 8) / viewport.scale}
+                        text={item.label}
+                        fontSize={9 / viewport.scale}
+                        fill={item.labelColor ?? '#1f2937'}
+                        align="center"
+                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        listening={false}
+                      />
+                    ) : null}
                   </Group>
                 );
               }),
@@ -1456,7 +1504,11 @@ export function BuildingMap({
                 ));
               }),
               ...(data.markers ?? []).map((item) => {
-                const pt = resolveLayerPosition(item.position, model);
+                const { hx, hy } = markerHalfExtents(item, viewport.scale);
+                const pt = clampMarkerToSpaceBbox(
+                  resolveLayerPosition(item.position, model),
+                  item.position, model, hx, hy,
+                );
                 const r = (item.radius ?? 5) / viewport.scale;
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
@@ -1495,6 +1547,18 @@ export function BuildingMap({
                       item.iconColor ?? '#f8fafc',
                       iconImages,
                     )}
+                    {item.label ? (
+                      <Text
+                        x={pt.x}
+                        y={pt.y + (r + 8) / viewport.scale}
+                        text={item.label}
+                        fontSize={9 / viewport.scale}
+                        fill={item.labelColor ?? '#1f2937'}
+                        align="center"
+                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        listening={false}
+                      />
+                    ) : null}
                   </Group>
                 );
               }),
@@ -1676,7 +1740,11 @@ export function BuildingMap({
                 ));
               }),
               ...(data.markers ?? []).map((item) => {
-                const pt = resolveLayerPosition(item.position, model);
+                const { hx, hy } = markerHalfExtents(item, viewport.scale);
+                const pt = clampMarkerToSpaceBbox(
+                  resolveLayerPosition(item.position, model),
+                  item.position, model, hx, hy,
+                );
                 const r = (item.radius ?? 5) / viewport.scale;
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
@@ -1707,6 +1775,18 @@ export function BuildingMap({
                       item.iconColor ?? '#f8fafc',
                       iconImages,
                     )}
+                    {item.label ? (
+                      <Text
+                        x={pt.x}
+                        y={pt.y + (r + 8) / viewport.scale}
+                        text={item.label}
+                        fontSize={9 / viewport.scale}
+                        fill={item.labelColor ?? '#1f2937'}
+                        align="center"
+                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        listening={false}
+                      />
+                    ) : null}
                   </Group>
                 );
               }),

@@ -474,6 +474,13 @@ export function parseBrickRecSource(source: BrickRecSource, profile: GeometryPro
   }
 
   const resolvedGeometryCache = new Map<string, BrickRecGeometry | null>();
+  const TRACE_IDS = new Set([
+    'urn:demo:space:ccspace-room-1',
+    'urn:demo:space:ccspace-room-2',
+    'urn:demo:space:ccspace-room-3',
+    'urn:demo:space:ccspace-room-4',
+  ]);
+
   const resolvedSpacesSource: BrickRecSpaceSource[] = source.spaces.map((space) => {
     const resolvedGeometry = resolveSpaceGeometry(
       space,
@@ -483,13 +490,27 @@ export function parseBrickRecSource(source: BrickRecSource, profile: GeometryPro
       resolvedGeometryCache,
     );
 
+    if (TRACE_IDS.has(space.id)) {
+      console.log('[adapter-trace] resolvedGeometry for space', {
+        id: space.id,
+        sourceGeometry: space.geometry,
+        resolvedGeometry,
+      });
+    }
+
     return {
       ...space,
       geometry: resolvedGeometry,
     };
   });
   const spaces = resolvedSpacesSource
-    .map((space) => toSpaceEntity(space, profile, diagnostics))
+    .map((space) => {
+      const entity = toSpaceEntity(space, profile, diagnostics);
+      if (TRACE_IDS.has(space.id)) {
+        console.log('[adapter-trace] toSpaceEntity result', { id: space.id, entity });
+      }
+      return entity;
+    })
     .filter((space): space is SpaceEntity => space !== null);
 
   const assets = (source.assets ?? []).map((asset) =>
