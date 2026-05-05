@@ -60,6 +60,7 @@ function makeRoomBottomRightIconMarkers(model: CanonicalBuildingMapModel): Marke
       },
       iconColor: '#1e3a8a',
       label: space.label,
+      showLabel: true,
       tooltip: `${space.label}\nspaceId=${space.id}`,
     });
   }

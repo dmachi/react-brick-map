@@ -788,27 +788,24 @@ export function BuildingMap({
     };
   }, [iconImages, imageUrls]);
 
-  // Invalidate layer cache when the RDF store or model changes.
-  useEffect(() => {
-    setLayerStatuses({});
-  }, [graphStatementCount, model]);
-
-  // Fetch data for visible external layers that have no cached result.
+  // Fetch data for visible external layers. Clears stale cache and re-fetches when
+  // model, rdf store, or layer definitions change — all in one effect to avoid the
+  // two-effect race where the clear and fetch run against different state snapshots.
   useEffect(() => {
     if (!layerDefinitions || layerDefinitions.length === 0) return;
     const ctx: LayerDataContext = { model, rdfStore: activeRdfStore };
-    const toFetch = layerDefinitions.filter((def) => {
-      const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
-      return isVisible && !layerStatuses[def.id];
-    });
-    if (toFetch.length === 0) return;
+    const visibleDefs = layerDefinitions.filter((def) =>
+      visibleLayers?.[def.id] ?? (def.defaultVisible ?? false),
+    );
+    if (visibleDefs.length === 0) return;
+    // Mark all visible layers as loading (clears any stale cached result).
     setLayerStatuses((prev) => {
       const next = { ...prev };
-      for (const def of toFetch) next[def.id] = { status: 'loading' };
+      for (const def of visibleDefs) next[def.id] = { status: 'loading' };
       return next;
     });
     let cancelled = false;
-    for (const def of toFetch) {
+    for (const def of visibleDefs) {
       const id = def.id;
       const doFetch = async () => {
         try {
@@ -1364,7 +1361,7 @@ export function BuildingMap({
                       item.iconColor ?? '#f8fafc',
                       iconImages,
                     )}
-                    {item.label ? (
+                    {item.showLabel && item.label ? (
                       <Text
                         x={pt.x}
                         y={pt.y + (r + 8) / viewport.scale}
@@ -1547,7 +1544,7 @@ export function BuildingMap({
                       item.iconColor ?? '#f8fafc',
                       iconImages,
                     )}
-                    {item.label ? (
+                    {item.showLabel && item.label ? (
                       <Text
                         x={pt.x}
                         y={pt.y + (r + 8) / viewport.scale}
@@ -1775,7 +1772,7 @@ export function BuildingMap({
                       item.iconColor ?? '#f8fafc',
                       iconImages,
                     )}
-                    {item.label ? (
+                    {item.showLabel && item.label ? (
                       <Text
                         x={pt.x}
                         y={pt.y + (r + 8) / viewport.scale}

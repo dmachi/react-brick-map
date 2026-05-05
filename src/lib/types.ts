@@ -226,6 +226,8 @@ export type MarkerLayerItem = {
   icon?: string | IconSpec;
   iconColor?: string;
   label?: string;
+  /** Set to `true` to render the label text. Defaults to `false`. */
+  showLabel?: boolean;
   labelColor?: string;
   tooltip?: string;
   onClick?: (item: MarkerLayerItem) => void;
