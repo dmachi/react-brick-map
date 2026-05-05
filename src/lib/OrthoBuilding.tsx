@@ -583,6 +583,12 @@ export function OrthoBuilding({
           maxX: Math.max(...projectedXs),
           maxY: Math.max(...projectedYs),
         };
+        const planBbox = {
+          minX: Math.min(...ring.map((p) => p.x)),
+          minY: Math.min(...ring.map((p) => p.y)),
+          maxX: Math.max(...ring.map((p) => p.x)),
+          maxY: Math.max(...ring.map((p) => p.y)),
+        };
         const depthScore = Math.hypot(
           centroid.x - projectionContext.center.x,
           centroid.y - projectionContext.center.y,
@@ -606,6 +612,7 @@ export function OrthoBuilding({
           walls,
           centroid,
           bbox,
+          planBbox,
           depthScore,
           radialNorm,
           interiorWallOpacity,
@@ -1205,24 +1212,26 @@ export function OrthoBuilding({
               <Group key={`label-${entry.space.id}`} listening={false}>
                 {entry.typeLabel && !entry.space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
                   <Text
-                    x={entry.centroid.x}
+                    x={entry.planBbox.minX}
                     y={entry.centroid.y}
                     text={entry.typeLabel}
                     fontSize={8 / viewport.scale}
                     fill={entry.visualStyle.iconColor ?? entry.visualStyle.labelColor}
-                    offsetX={(entry.typeLabel.length * 2.2) / viewport.scale}
-                    offsetY={4 / viewport.scale}
+                    width={(entry.planBbox.maxX - entry.planBbox.minX)}
+                    align="center"
+                    offsetY={(8 / 2) / viewport.scale}
                   />
                 ) : null}
                 {entry.space.hasExplicitLabel ? (
                   <Text
-                    x={entry.centroid.x}
+                    x={entry.planBbox.minX}
                     y={entry.centroid.y}
                     text={entry.space.label}
                     fontSize={12 / viewport.scale}
                     fill={entry.visualStyle.labelColor}
-                    offsetX={(entry.space.label.length * 3) / viewport.scale}
-                    offsetY={6 / viewport.scale}
+                    width={(entry.planBbox.maxX - entry.planBbox.minX)}
+                    align="center"
+                    offsetY={(12 / 2) / viewport.scale}
                   />
                 ) : null}
               </Group>

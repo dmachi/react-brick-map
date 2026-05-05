@@ -1436,24 +1436,26 @@ export function BuildingMap({
                     />
                     {spaceTypeLabel && !space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
                       <Text
-                        x={centroid.x}
+                        x={bbox.minX}
                         y={centroid.y}
                         text={spaceTypeLabel}
                         fontSize={8 / viewport.scale}
                         fill={spaceStyle.iconColor ?? spaceStyle.labelColor}
-                        offsetX={(spaceTypeLabel.length * 2.2) / viewport.scale}
-                        offsetY={4 / viewport.scale}
+                        width={bbox.maxX - bbox.minX}
+                        align="center"
+                        offsetY={(8 / 2) / viewport.scale}
                       />
                     ) : null}
                     {space.hasExplicitLabel ? (
                       <Text
-                        x={centroid.x}
+                        x={bbox.minX}
                         y={centroid.y}
                         text={space.label}
                         fontSize={12 / viewport.scale}
                         fill={spaceStyle.labelColor}
-                        offsetX={(space.label.length * 3) / viewport.scale}
-                        offsetY={6 / viewport.scale}
+                        width={bbox.maxX - bbox.minX}
+                        align="center"
+                        offsetY={(12 / 2) / viewport.scale}
                       />
                     ) : null}
                   </Group>
