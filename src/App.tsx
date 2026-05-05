@@ -27,26 +27,33 @@ const DEMO_ROOM_IDS = [
 
 function makeRoomBottomRightIconMarkers(model: CanonicalBuildingMapModel): MarkerLayerItem[] {
   const markers: MarkerLayerItem[] = [];
-  const iconSize = 30;
+  const iconSize = 22;
+  const insetFromCorner = 0.5;
+  const cornerByIndex: Array<'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'> = [
+    'top-left',
+    'top-right',
+    'bottom-left',
+    'bottom-right',
+  ];
+  const iconColorByIndex = ['#1e3a8a', '#14532d', '#7c2d12', '#6b21a8'];
 
-  for (const spaceId of DEMO_ROOM_IDS) {
+  for (const [index, spaceId] of DEMO_ROOM_IDS.entries()) {
     const space = model.spaces.find((s) => s.id === spaceId);
     if (!space) {
       continue;
     }
 
-    const ring = getPrimaryRing(space);
-    const xs = ring.map((p) => p.x);
-    const ys = ring.map((p) => p.y);
-    const width = xs.length > 1 ? Math.max(...xs) - Math.min(...xs) : 0;
-    const height = ys.length > 1 ? Math.max(...ys) - Math.min(...ys) : 0;
-
-    const offsetX = width * 0.85;
-    const offsetY = height * 0.85;
+    const originCorner = cornerByIndex[index % cornerByIndex.length];
+    const iconColor = iconColorByIndex[index % iconColorByIndex.length];
 
     markers.push({
-      id: `room-bottom-right-${space.id}`,
-      position: { spaceId: space.id, x: offsetX, y: offsetY },
+      id: `room-corner-${space.id}`,
+      position: {
+        spaceId: space.id,
+        originCorner,
+        x: insetFromCorner,
+        y: insetFromCorner,
+      },
       fill: 'transparent',
       stroke: 'transparent',
       radius: 0,
@@ -58,10 +65,10 @@ function makeRoomBottomRightIconMarkers(model: CanonicalBuildingMapModel): Marke
         width: iconSize,
         height: iconSize,
       },
-      iconColor: '#1e3a8a',
-      label: space.label,
+      iconColor,
+      label: `${originCorner} Icon`,
       showLabel: true,
-      tooltip: `${space.label}\nspaceId=${space.id}`,
+      tooltip: `${space.label}\nspaceId=${space.id}\noriginCorner=${originCorner}`,
     });
   }
 
@@ -94,7 +101,7 @@ function App() {
   const layerDefinitions = useMemo<LayerDefinition[]>(() => [
     {
       id: 'roomCornerIcons',
-      label: 'Room Bottom-Right Icons',
+      label: 'Room Corner Icons',
       color: '#1f2937',
       renderOrder: 'overlay',
       getData: ({ model }) => {

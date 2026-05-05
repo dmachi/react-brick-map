@@ -86,12 +86,26 @@ export type CanonicalBuildingMapModel = {
  */
 export type SpaceRelativePosition = {
   spaceId: Id;
+  /**
+   * Which space bounding-box corner acts as local origin.
+   *
+   * - `top-left` (default): x -> right, y -> down
+   * - `top-right`: x -> left, y -> down
+   * - `bottom-left`: x -> right, y -> up
+   * - `bottom-right`: x -> left, y -> up
+   */
+  originCorner?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   x: number;
   y: number;
   z?: number;
 };
 
 export type PlanPosition = {
+  /**
+   * Optional for schema symmetry. Ignored when `spaceId` is not provided.
+   * Absolute positions are always interpreted in global plan coordinates.
+   */
+  originCorner?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   x: number;
   y: number;
   z?: number;
@@ -101,6 +115,9 @@ export type PlanPosition = {
  * A position for a layer item — either absolute plan coordinates (XY with an
  * optional `z` height) or space-relative coordinates (identified by `spaceId`).
  * Discriminated by the presence of `spaceId`.
+ *
+ * When `spaceId` is absent, coordinates are global plan coordinates even if
+ * `originCorner` is present.
  */
 export type LayerPosition = PlanPosition | SpaceRelativePosition;
 

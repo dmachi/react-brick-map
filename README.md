@@ -204,15 +204,35 @@ Every positioned item (`MarkerLayerItem`, `AnnotationLayerItem`, `CustomLayerIte
 
 ```ts
 // Absolute plan coordinates (default)
-type AbsolutePosition = { x: number; y: number; z?: number };
+type AbsolutePosition = {
+  x: number;
+  y: number;
+  z?: number;
+  originCorner?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+};
 
-// Offset from a specific space's bounding-box min-corner
-type SpaceRelativePosition = { spaceId: string; x: number; y: number; z?: number };
+// Offset from a specific space bounding-box corner
+type SpaceRelativePosition = {
+  spaceId: string;
+  originCorner?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  x: number;
+  y: number;
+  z?: number;
+};
 
 type LayerPosition = AbsolutePosition | SpaceRelativePosition;
 ```
 
-`SpaceRelativePosition` is discriminated by the presence of `spaceId`. The resolver finds the space in `model.spaces`, computes its bounding-box origin, and adds the offset. If the space is not found, `x`/`y` are treated as absolute coordinates.
+`SpaceRelativePosition` is discriminated by the presence of `spaceId`. The resolver finds the space in `model.spaces`, computes its bounding box, and applies offsets from the requested corner:
+
+- `top-left` (default): x right, y down
+- `top-right`: x left, y down
+- `bottom-left`: x right, y up
+- `bottom-right`: x left, y up
+
+If the space is not found, `x`/`y` are treated as absolute coordinates.
+
+If `spaceId` is not provided, position is always global (absolute plan coordinates), even when `originCorner` is present.
 
 `z` is interpreted only by `OrthoBuilding` during projection; it is ignored by the 2-D `BuildingMap`.
 
@@ -372,30 +392,51 @@ const roomMetricsLayer: LayerDefinition = {
 
 ### Space-relative positioning
 
-Items can be positioned relative to a room's bounding-box min-corner using `SpaceRelativePosition`. This is useful when item coordinates are authored in room-local space (e.g. from a BIM export) without knowing the absolute plan position.
+Items can be positioned relative to a room bounding-box corner using `SpaceRelativePosition`. This is useful when item coordinates are authored in room-local space (e.g. from a BIM export) without knowing the absolute plan position.
 
 ```tsx
-// Room "lab-north" is a 10 × 10 m space. Place a marker at its local (5, 5) centre.
+// Room "lab-north" is a 10 × 10 m space. Place a marker at its local (5, 5) centre
+// using top-left semantics (default): +x right, +y down.
 const markers: MarkerLayerItem[] = [
   {
     id: 'co2-sensor-lab',
-    position: { spaceId: 'lab-north', x: 5, y: 5 },  // room-local offset from bbox min
+    position: { spaceId: 'lab-north', x: 5, y: 5 },
     shape: 'circle',
     radius: 3,
     fill: '#064e3b',
     stroke: '#34d399',
     tooltip: 'CO₂ sensor',
   },
+  {
+    id: 'nameplate-lab',
+    // Inset 0.6 m from the room's bottom-right corner.
+    position: { spaceId: 'lab-north', originCorner: 'bottom-right', x: 0.6, y: 0.6 },
+    shape: 'diamond',
+    width: 1,
+    height: 1,
+    fill: '#1e3a8a',
+    stroke: '#93c5fd',
+    tooltip: 'Bottom-right inset marker',
+  },
 ];
 
-// Place an annotation at the bottom-left of every room (0, 0 in room-local space)
+// Place an annotation at the top-left inset of every room.
 const annotations: AnnotationLayerItem[] = model.spaces.map((space) => ({
   id: `${space.id}-corner`,
-  position: { spaceId: space.id, x: 0.5, y: 0.5 },
+  position: { spaceId: space.id, originCorner: 'top-left', x: 0.5, y: 0.5 },
   text: space.label,
   color: '#334155',
   fontSize: 8,
 }));
+
+// Global position remains global when no spaceId is provided, even with originCorner.
+const globalCallout: AnnotationLayerItem = {
+  id: 'global-callout',
+  position: { x: 18, y: 6, originCorner: 'bottom-right' },
+  text: 'Global overlay callout',
+  color: '#1f2937',
+  fontSize: 9,
+};
 ```
 
 ---

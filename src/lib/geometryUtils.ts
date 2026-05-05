@@ -347,13 +347,15 @@ export function findAnchorForAnnotation(annotation: AnnotationEntity, model: Can
  * Resolve a `LayerPosition` to absolute plan-coordinate XY.
  *
  * - If `pos` contains a `spaceId`, the position is treated as an offset from
- *   the space's bounding-box min-corner (minX, minY) using the plan coordinate
- *   system. The `z` component is preserved on `LayerPosition` but is not
+ *   the space's bounding-box corner using `originCorner` semantics:
+ *   `top-left` (default), `top-right`, `bottom-left`, or `bottom-right`.
+ *   The `z` component is preserved on `LayerPosition` but is not
  *   returned here — callers that need it (e.g. OrthoBuilding for wall-height
  *   projection) should read `pos.z` directly.
  * - If the referenced space is not found, `x` and `y` are returned as-is
  *   (treated as absolute plan coordinates).
- * - Absolute plan positions are returned unchanged.
+ * - Absolute plan positions are returned unchanged. If `originCorner` is
+ *   provided without `spaceId`, it is ignored and coordinates remain global.
  */
 export function resolveLayerPosition(
   pos: LayerPosition,
@@ -383,9 +385,27 @@ export function resolveLayerPosition(
     if (space) {
       const ring = getPrimaryRing(space);
       const bbox = computeBoundingBox(ring);
-      const resolved = { x: bbox.minX + x, y: bbox.minY + y };
+      const originCorner = pos.originCorner ?? 'top-left';
+
+      let resolved: XY;
+      switch (originCorner) {
+        case 'top-right':
+          resolved = { x: bbox.maxX - x, y: bbox.minY + y };
+          break;
+        case 'bottom-left':
+          resolved = { x: bbox.minX + x, y: bbox.maxY - y };
+          break;
+        case 'bottom-right':
+          resolved = { x: bbox.maxX - x, y: bbox.maxY - y };
+          break;
+        case 'top-left':
+        default:
+          resolved = { x: bbox.minX + x, y: bbox.minY + y };
+          break;
+      }
       console.info('[layer-debug][resolveLayerPosition] space-relative resolved', {
         spaceId: pos.spaceId,
+        originCorner,
         input: { x: pos.x, y: pos.y },
         resolved,
       });
