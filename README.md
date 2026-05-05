@@ -246,6 +246,9 @@ const occupancyLayer: LayerDefinition = {
 
 ### Markers — circle, rect, diamond (`MarkerLayerItem`)
 
+`icon` accepts either a string shorthand or the same `IconSpec` objects used by `visualControls`.
+Use `kind: 'image'` for browser-loadable image URLs such as `.svg`, `.png`, or `.webp`.
+
 ```tsx
 const sensorsLayer: LayerDefinition = {
   id: 'sensors',
@@ -262,7 +265,7 @@ const sensorsLayer: LayerDefinition = {
         radius: 4,
         fill: '#0f172a',
         stroke: '#38bdf8',
-        icon: '⚡',
+        icon: '⚡',                     // string shorthand => { kind: 'text', text: '⚡' }
         iconColor: '#bae6fd',
         label: asset.label,
         tooltip: asset.label,
@@ -288,9 +291,26 @@ const hvacZoneLayer: LayerDefinition = {
         rotation: 15,
         fill: '#431407',
         stroke: '#fb923c',
-        icon: '⬡',
+        icon: {
+          kind: 'svg-path',
+          path: 'M12 2 L20 12 L12 22 L4 12 Z',
+          viewBoxWidth: 24,
+          viewBoxHeight: 24,
+          width: 10,
+          height: 10,
+        },
         iconColor: '#fed7aa',
         tooltip: 'AHU-1',
+      },
+      {
+        id: 'co2-south',
+        position: { x: 18.5, y: 11.2 },
+        shape: 'circle',
+        radius: 4,
+        fill: '#14532d',
+        stroke: '#86efac',
+        icon: { kind: 'image', url: '/favicon.svg', width: 12, height: 12 },
+        tooltip: 'CO₂ marker loaded from an image URL',
       },
     ],
   }),

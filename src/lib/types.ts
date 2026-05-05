@@ -223,7 +223,7 @@ export type MarkerLayerItem = {
   fill?: string;
   stroke?: string;
   radius?: number;
-  icon?: string;
+  icon?: string | IconSpec;
   iconColor?: string;
   label?: string;
   labelColor?: string;
@@ -303,6 +303,14 @@ export type LayerDefinition = {
   color?: string;
   defaultVisible?: boolean;
   renderOrder?: LayerRenderOrder;
+  /**
+   * Optional stable identity for cache invalidation.
+   *
+   * When provided, map renderers will reload this layer only when `cacheKey`
+   * changes (or when RDF graph data changes), enabling no-op updates to skip
+   * layer re-fetch and re-render work.
+   */
+  cacheKey?: string | number;
   data?: LayerData;
   getData?: (context: LayerDataContext) => LayerData | Promise<LayerData>;
 };

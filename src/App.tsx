@@ -9,7 +9,7 @@ import {
   loadBrickRecFromJsonLd,
   loadBrickRecFromTurtle,
 } from './lib';
-import type { BrickRecSource, CanonicalBuildingMapModel, LayerDefinition } from './lib';
+import type { BrickRecSource, CanonicalBuildingMapModel, LayerDefinition, MarkerLayerItem } from './lib';
 import { isSensorAsset, isHvacAsset } from './lib/assetClassifiers';
 import { computeSpaceMetrics, centroidOfRing, getPrimaryRing } from './lib/geometryUtils';
 import {
@@ -18,17 +18,7 @@ import {
   sampleBrickTurtle,
 } from './lib/sampleData.ts';
 
-function makeSpaceRelativeMarkerFixture(model: CanonicalBuildingMapModel): Array<{
-  id: string;
-  position: { spaceId: string; x: number; y: number };
-  fill: string;
-  stroke: string;
-  radius: number;
-  icon: string;
-  iconColor: string;
-  label: string;
-  tooltip: string;
-}> {
+function makeSpaceRelativeMarkerFixture(model: CanonicalBuildingMapModel): MarkerLayerItem[] {
   const rooms = model.spaces.slice(0, 3);
   return rooms.flatMap((space, roomIndex) => {
     const ring = getPrimaryRing(space);
@@ -56,6 +46,12 @@ function makeSpaceRelativeMarkerFixture(model: CanonicalBuildingMapModel): Array
       y: boundaryLocal.y,
     };
 
+    const imagePosition: { spaceId: string; x: number; y: number } = {
+      spaceId: exactSpaceId,
+      x: Math.max(0.8, width * 0.2),
+      y: Math.max(0.8, height * 0.2),
+    };
+
     return [
       {
         id: `fixture-center-${roomIndex + 1}`,
@@ -74,10 +70,33 @@ function makeSpaceRelativeMarkerFixture(model: CanonicalBuildingMapModel): Array
         fill: '#7c2d12',
         stroke: '#fdba74',
         radius: 5,
-        icon: 'B',
+        icon: {
+          kind: 'svg-path',
+          path: 'M12 2 L20 12 L12 22 L4 12 Z',
+          viewBoxWidth: 24,
+          viewBoxHeight: 24,
+          width: 10,
+          height: 10,
+        },
         iconColor: '#ffedd5',
         label: `${space.label} boundary`,
         tooltip: `boundary marker\nspaceId=${boundaryPosition.spaceId}`,
+      },
+      {
+        id: `fixture-image-${roomIndex + 1}`,
+        position: imagePosition,
+        fill: '#14532d',
+        stroke: '#86efac',
+        radius: 5,
+        icon: {
+          kind: 'image',
+          url: '/favicon.svg',
+          width: 12,
+          height: 12,
+        },
+        iconColor: '#dcfce7',
+        label: `${space.label} image`,
+        tooltip: `image marker\nspaceId=${imagePosition.spaceId}`,
       },
     ];
   });

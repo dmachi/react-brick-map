@@ -24,6 +24,8 @@ export type {
   OrthoBuildingProps,
 } from './OrthoBuilding.tsx';
 
+export { renderIconAt } from './iconRendering';
+
 export { parseBrickRecSource } from './brickRecAdapter';
 export type {
   BrickRecSource,

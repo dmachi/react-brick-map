@@ -1,6 +1,7 @@
 import type {
   AssetEntity,
   AssetVisualOverride,
+  LayerData,
   IconImageSpec,
   IconSpec,
   IconTextSpec,
@@ -46,6 +47,10 @@ function normalizeIconSpec(icon: string | IconSpec | undefined): IconSpec | unde
     return { kind: 'text', text: icon };
   }
   return icon;
+}
+
+export function normalizeLayerIconSpec(icon: string | IconSpec | undefined): IconSpec | undefined {
+  return normalizeIconSpec(icon);
 }
 
 function resolveRotationDegrees(
@@ -96,6 +101,24 @@ export function collectVisualControlImageUrls(visualControls?: VisualControlStat
   Object.values(visualControls.classes?.assets ?? {}).forEach((value) => collect(value.icon));
   Object.values(visualControls.spaces ?? {}).forEach((value) => collect(value.icon));
   Object.values(visualControls.assets ?? {}).forEach((value) => collect(value.icon));
+
+  return Array.from(urls);
+}
+
+export function collectLayerImageUrls(layerData: LayerData[]): string[] {
+  if (layerData.length === 0) {
+    return [];
+  }
+
+  const urls = new Set<string>();
+  for (const data of layerData) {
+    for (const marker of data.markers ?? []) {
+      const spec = normalizeLayerIconSpec(marker.icon);
+      if (spec?.kind === 'image' && spec.url) {
+        urls.add(spec.url);
+      }
+    }
+  }
 
   return Array.from(urls);
 }

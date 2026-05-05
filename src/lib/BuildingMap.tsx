@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Arc, Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Text } from 'react-konva';
+import { Arc, Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type {
   AnnotationEntity,
   AssetEntity,
   CanonicalBuildingMapModel,
-  IconSpec,
   LayerData,
   LayerDefinition,
   LayerDataContext,
@@ -16,13 +15,15 @@ import type {
 import { createRdfStore, type RdfStore } from './rdfStore';
 import { buildAssetTooltip, getNumericAssetMetadata, resolveLayerPosition } from './geometryUtils';
 import {
+  collectLayerImageUrls,
   collectVisualControlImageUrls,
   getIconText,
   hasVelocityRotation,
-  isImageIcon,
+  normalizeLayerIconSpec,
   resolveAssetVisual,
   resolveSpaceVisual,
 } from './visualControls';
+import { renderIconAt } from './iconRendering';
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
@@ -672,9 +673,34 @@ export function BuildingMap({
   const [internalAnimationClockMs, setInternalAnimationClockMs] = useState(() => Date.now());
   const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement>>({});
 
-  const imageUrls = useMemo(
+  const visualControlImageUrls = useMemo(
     () => collectVisualControlImageUrls(visualControls),
     [visualControls],
+  );
+  const visibleLoadedLayerData = useMemo(() => {
+    if (!layerDefinitions || layerDefinitions.length === 0) {
+      return [] as LayerData[];
+    }
+
+    const data: LayerData[] = [];
+    for (const def of layerDefinitions) {
+      const isVisible = visibleLayers?.[def.id] ?? (def.defaultVisible ?? false);
+      if (!isVisible) {
+        continue;
+      }
+      const status = layerStatuses[def.id];
+      if (status?.status === 'loaded') {
+        data.push(status.data);
+      }
+    }
+    return data;
+  }, [layerDefinitions, visibleLayers, layerStatuses]);
+  const imageUrls = useMemo(
+    () => Array.from(new Set([
+      ...visualControlImageUrls,
+      ...collectLayerImageUrls(visibleLoadedLayerData),
+    ])),
+    [visualControlImageUrls, visibleLoadedLayerData],
   );
   const hasInternalAnimation = useMemo(
     () => hasVelocityRotation(visualControls) && visualControls?.animationClockMs === undefined,
@@ -940,71 +966,6 @@ export function BuildingMap({
     };
 
     updateViewport(next);
-  }
-
-  function renderIconAt(
-    icon: IconSpec | undefined,
-    x: number,
-    y: number,
-    scale: number,
-    fallbackColor: string,
-  ) {
-    if (!icon) {
-      return null;
-    }
-
-    if (icon.kind === 'text') {
-      return (
-        <Text
-          x={x}
-          y={y}
-          text={icon.text}
-          fontSize={6 / scale}
-          fill={fallbackColor}
-          offsetX={2 / scale}
-          offsetY={2 / scale}
-        />
-      );
-    }
-
-    if (icon.kind === 'svg-path') {
-      const widthPx = (icon.width ?? 10) / scale;
-      const heightPx = (icon.height ?? 10) / scale;
-      const viewBoxWidth = icon.viewBoxWidth ?? 24;
-      const viewBoxHeight = icon.viewBoxHeight ?? 24;
-      return (
-        <Path
-          data={icon.path}
-          x={x - widthPx / 2}
-          y={y - heightPx / 2}
-          scaleX={widthPx / viewBoxWidth}
-          scaleY={heightPx / viewBoxHeight}
-          fill={icon.fill ?? fallbackColor}
-          stroke={icon.stroke}
-          strokeWidth={icon.strokeWidth != null ? icon.strokeWidth / scale : undefined}
-        />
-      );
-    }
-
-    if (isImageIcon(icon)) {
-      const image = iconImages[icon.url];
-      if (!image) {
-        return null;
-      }
-      const widthPx = (icon.width ?? 14) / scale;
-      const heightPx = (icon.height ?? 14) / scale;
-      return (
-        <KonvaImage
-          image={image}
-          x={x - widthPx / 2}
-          y={y - heightPx / 2}
-          width={widthPx}
-          height={heightPx}
-        />
-      );
-    }
-
-    return null;
   }
 
   const overflowScale = Math.max(1, viewport.scale / Math.max(transform.scale, 0.0001));
@@ -1359,9 +1320,14 @@ export function BuildingMap({
                         offsetX={w / 2} offsetY={h / 2}
                         fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
                     )}
-                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
-                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
-                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                    {renderIconAt(
+                      normalizeLayerIconSpec(item.icon),
+                      pt.x,
+                      pt.y,
+                      viewport.scale,
+                      item.iconColor ?? '#f8fafc',
+                      iconImages,
+                    )}
                   </Group>
                 );
               }),
@@ -1521,9 +1487,14 @@ export function BuildingMap({
                         offsetX={w / 2} offsetY={h / 2}
                         fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
                     )}
-                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
-                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
-                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                    {renderIconAt(
+                      normalizeLayerIconSpec(item.icon),
+                      pt.x,
+                      pt.y,
+                      viewport.scale,
+                      item.iconColor ?? '#f8fafc',
+                      iconImages,
+                    )}
                   </Group>
                 );
               }),
@@ -1669,6 +1640,7 @@ export function BuildingMap({
                         iconPosition.y - asset.position.y,
                         viewport.scale,
                         assetStyle.iconColor ?? assetStyle.labelColor,
+                        iconImages,
                       )}
                     </>
                   )}
@@ -1727,9 +1699,14 @@ export function BuildingMap({
                         offsetX={w / 2} offsetY={h / 2}
                         fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
                     )}
-                    {item.icon ? <Text x={pt.x} y={pt.y} text={item.icon}
-                      fontSize={6 / viewport.scale} fill={item.iconColor ?? '#f8fafc'}
-                      offsetX={2 / viewport.scale} offsetY={2 / viewport.scale} /> : null}
+                    {renderIconAt(
+                      normalizeLayerIconSpec(item.icon),
+                      pt.x,
+                      pt.y,
+                      viewport.scale,
+                      item.iconColor ?? '#f8fafc',
+                      iconImages,
+                    )}
                   </Group>
                 );
               }),
