@@ -14,7 +14,14 @@ import type {
   XY,
 } from './types';
 import { createRdfStore, type RdfStore } from './rdfStore';
-import { buildAssetTooltip, getNumericAssetMetadata, resolveLayerPosition, clampMarkerToSpaceBbox } from './geometryUtils';
+import {
+  buildAssetTooltip,
+  getNumericAssetMetadata,
+  resolveLayerPosition,
+  clampMarkerToSpaceBbox,
+  resolveSpaceLabelBoxGeometry,
+  resolveSpaceLabelLayout,
+} from './geometryUtils';
 import {
   collectLayerImageUrls,
   collectVisualControlImageUrls,
@@ -1403,7 +1410,6 @@ export function BuildingMap({
               const isHovered = hoveredSpaceId === space.id;
               const baseSpaceStyle = resolveSpaceStyle(resolvedTheme, space);
               const spaceStyle = resolveSpaceVisual(space, baseSpaceStyle, visualControls);
-              const spaceTypeLabel = getIconText(spaceStyle.iconSpec) ?? formatBrickTypeLabel(space.brickClass) ?? spaceStyle.icon;
 
               const fill = isSelected
                 ? spaceStyle.fillSelected
@@ -1412,7 +1418,6 @@ export function BuildingMap({
                   : spaceStyle.fill;
 
               if (space.geometry.type === 'Polygon') {
-                const centroid = centroidOfRing(space.geometry.rings[0] ?? []);
                 const bbox = computeBoundingBox(space.geometry.rings[0] ?? []);
                 const gradientStops = makeGradientStops(fill);
                 return (
@@ -1434,30 +1439,6 @@ export function BuildingMap({
                       onMouseLeave={() => setHoveredSpaceId(null)}
                       onClick={() => onSpaceClick?.(space)}
                     />
-                    {spaceTypeLabel && !space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
-                      <Text
-                        x={bbox.minX}
-                        y={centroid.y}
-                        text={spaceTypeLabel}
-                        fontSize={8 / viewport.scale}
-                        fill={spaceStyle.iconColor ?? spaceStyle.labelColor}
-                        width={bbox.maxX - bbox.minX}
-                        align="center"
-                        offsetY={(8 / 2) / viewport.scale}
-                      />
-                    ) : null}
-                    {space.hasExplicitLabel ? (
-                      <Text
-                        x={bbox.minX}
-                        y={centroid.y}
-                        text={space.label}
-                        fontSize={12 / viewport.scale}
-                        fill={spaceStyle.labelColor}
-                        width={bbox.maxX - bbox.minX}
-                        align="center"
-                        offsetY={(12 / 2) / viewport.scale}
-                      />
-                    ) : null}
                   </Group>
                 );
               }
@@ -1722,6 +1703,93 @@ export function BuildingMap({
                   fill={annotation.color ?? resolvedTheme.annotationColor}
                   fontSize={10 / viewport.scale}
                 />
+              );
+            })}
+
+            {/* Room labels at overlay level */}
+            {model.spaces.map((space) => {
+              const ring = getPrimaryRing(space);
+              if (ring.length < 3) {
+                return null;
+              }
+
+              const roomLabelPosition = visualControls?.labelOptions?.spaceLabelPosition ?? 'center';
+              const baseSpaceStyle = resolveSpaceStyle(resolvedTheme, space);
+              const spaceStyle = resolveSpaceVisual(space, baseSpaceStyle, visualControls);
+              const spaceTypeLabel = getIconText(spaceStyle.iconSpec) ?? formatBrickTypeLabel(space.brickClass) ?? spaceStyle.icon;
+              const bbox = computeBoundingBox(ring);
+
+              return (
+                <Group key={`room-label-${space.id}`} listening={false}>
+                  {spaceTypeLabel && !space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
+                    (() => {
+                      const fontSize = 8 / viewport.scale;
+                      const labelLayout = resolveSpaceLabelLayout(bbox, fontSize, roomLabelPosition);
+                      const labelBox = resolveSpaceLabelBoxGeometry(labelLayout, spaceTypeLabel, fontSize);
+                      return (
+                        <>
+                          <Rect
+                            x={labelBox.rectX}
+                            y={labelBox.rectY}
+                            width={labelBox.rectWidth}
+                            height={labelBox.rectHeight}
+                            fill="#ffffff"
+                            stroke="#9ca3af"
+                            strokeWidth={0.9 / viewport.scale}
+                            cornerRadius={2 / viewport.scale}
+                          />
+                          <Text
+                            x={labelBox.textX}
+                            y={labelBox.textY}
+                            text={spaceTypeLabel}
+                            fontSize={fontSize}
+                            fill={spaceStyle.iconColor ?? spaceStyle.labelColor}
+                            width={labelBox.textWidth}
+                            height={labelBox.textHeight}
+                            align="center"
+                            verticalAlign="middle"
+                            wrap="word"
+                            lineHeight={1.15}
+                          />
+                        </>
+                      );
+                    })()
+                  ) : null}
+                  {space.hasExplicitLabel ? (
+                    (() => {
+                      const fontSize = 12 / viewport.scale;
+                      const labelLayout = resolveSpaceLabelLayout(bbox, fontSize, roomLabelPosition);
+                      const labelBox = resolveSpaceLabelBoxGeometry(labelLayout, space.label, fontSize);
+                      return (
+                        <>
+                          <Rect
+                            x={labelBox.rectX}
+                            y={labelBox.rectY}
+                            width={labelBox.rectWidth}
+                            height={labelBox.rectHeight}
+                            fill="#ffffff"
+                            stroke="#9ca3af"
+                            strokeWidth={0.9 / viewport.scale}
+                            cornerRadius={2 / viewport.scale}
+                          />
+                          <Text
+                            x={labelBox.textX}
+                            y={labelBox.textY}
+                            text={space.label}
+                            fontSize={fontSize}
+                            fill={spaceStyle.labelColor}
+                            width={labelBox.textWidth}
+                            height={labelBox.textHeight}
+                            align="center"
+                            verticalAlign="middle"
+                            wrap="word"
+                            lineHeight={1.15}
+                          />
+                        </>
+                      );
+                    })()
+                  ) : null}
+                </Group>
               );
             })}
 

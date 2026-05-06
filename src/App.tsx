@@ -77,11 +77,12 @@ function makeRoomBottomRightIconMarkers(model: CanonicalBuildingMapModel): Marke
 
 function App() {
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | undefined>();
-  const [selectedProfileKey, setSelectedProfileKey] = useState('localMetersYDown');
   const [resetToken, setResetToken] = useState(0);
   const [viewportLabel, setViewportLabel] = useState('x:0 y:0 z:1');
   const [sourceType, setSourceType] = useState<'fixture' | 'turtle' | 'jsonld'>('jsonld');
-  const [mapView, setMapView] = useState<'plan' | 'ortho'>('plan');
+  const [labelPosition, setLabelPosition] = useState<
+    'center' | 'center-top' | 'center-bottom' | 'center-right' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  >('center');
   const [loadedSource, setLoadedSource] = useState<BrickRecSource | null>(null);
   const [loadedSourceType, setLoadedSourceType] = useState<'turtle' | 'jsonld' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -198,8 +199,17 @@ function App() {
     setVisibleLayers((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const profile = useMemo(
-    () => parseGeometryProfile(geometryProfiles[selectedProfileKey]),
-    [selectedProfileKey],
+    () => parseGeometryProfile(geometryProfiles.localMetersYDown),
+    [],
+  );
+
+  const visualControls = useMemo(
+    () => ({
+      labelOptions: {
+        spaceLabelPosition: labelPosition,
+      },
+    }),
+    [labelPosition],
   );
 
   const source =
@@ -340,40 +350,23 @@ function App() {
         <h1>react-brick-map</h1>
         <p>
           BRICK and REC ready canvas map with profile-driven geometry normalization,
-          runtime profile switching, and interactive pan/zoom.
+          and interactive pan/zoom.
         </p>
         <div className="controls-row">
-          <label htmlFor="profile-select">Geometry profile</label>
+          <label htmlFor="label-position-select">Room label position</label>
           <select
-            id="profile-select"
-            value={selectedProfileKey}
-            onChange={(event) => {
-              setSelectedProfileKey(event.target.value);
-              setResetToken((value) => value + 1);
-            }}
+            id="label-position-select"
+            value={labelPosition}
+            onChange={(event) => setLabelPosition(event.target.value as typeof labelPosition)}
           >
-            {Object.keys(geometryProfiles).map((key) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={() => setResetToken((value) => value + 1)}>
-            Zoom to fit
-          </button>
-        </div>
-        <div className="controls-row">
-          <label htmlFor="map-view-select">Map view</label>
-          <select
-            id="map-view-select"
-            value={mapView}
-            onChange={(event) => {
-              setMapView(event.target.value as 'plan' | 'ortho');
-              setResetToken((value) => value + 1);
-            }}
-          >
-            <option value="plan">2D Plan</option>
-            <option value="ortho">2.5D Ortho</option>
+            <option value="center">center</option>
+            <option value="center-top">center-top</option>
+            <option value="center-bottom">center-bottom</option>
+            <option value="center-right">center-right</option>
+            <option value="top-left">top-left</option>
+            <option value="top-right">top-right</option>
+            <option value="bottom-left">bottom-left</option>
+            <option value="bottom-right">bottom-right</option>
           </select>
         </div>
         <div className="controls-row">
@@ -415,38 +408,37 @@ function App() {
 
       <section className="map-panel" ref={mapPanelRef}>
         <div className={showDualMaps ? 'map-compare-grid' : undefined}>
-          {(showDualMaps || mapView === 'plan') ? (
-            <div className={showDualMaps ? 'map-compare-cell' : undefined}>
-              <BuildingMap
-                model={parsed.model}
-                width={mapRenderWidth}
-                height={mapSize.height}
-                controls={{
-                  enabled: true,
-                  zoomToFit: true,
-                  fullScreen: true,
-                  layerPanel: true,
-                }}
-                northDirectionDegrees={profile.northDirectionDegrees}
-                selectedSpaceId={selectedSpaceId}
-                resetToken={resetToken}
-                layers={layerDefinitions}
-                visibleLayers={visibleLayers}
-                onLayerToggle={toggleLayer}
-                onViewportChange={(viewport) => {
-                  setViewportLabel(
-                    `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
-                  );
-                }}
-                onSpaceClick={(space) => setSelectedSpaceId(space.id)}
-                onAssetClick={(asset) => {
-                  setSelectedSpaceId(asset.spaceId);
-                }}
-              />
-            </div>
-          ) : null}
+          <div className={showDualMaps ? 'map-compare-cell' : undefined}>
+            <BuildingMap
+              model={parsed.model}
+              width={mapRenderWidth}
+              height={mapSize.height}
+              controls={{
+                enabled: true,
+                zoomToFit: true,
+                fullScreen: true,
+                layerPanel: true,
+              }}
+              northDirectionDegrees={profile.northDirectionDegrees}
+              selectedSpaceId={selectedSpaceId}
+              resetToken={resetToken}
+              layers={layerDefinitions}
+              visibleLayers={visibleLayers}
+              onLayerToggle={toggleLayer}
+              visualControls={visualControls}
+              onViewportChange={(viewport) => {
+                setViewportLabel(
+                  `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
+                );
+              }}
+              onSpaceClick={(space) => setSelectedSpaceId(space.id)}
+              onAssetClick={(asset) => {
+                setSelectedSpaceId(asset.spaceId);
+              }}
+            />
+          </div>
 
-          {(showDualMaps || mapView === 'ortho') ? (
+          {showDualMaps ? (
             <div className={showDualMaps ? 'map-compare-cell' : undefined}>
               <OrthoBuilding
                 model={parsed.model}
@@ -464,6 +456,7 @@ function App() {
                 layers={layerDefinitions}
                 visibleLayers={visibleLayers}
                 onLayerToggle={toggleLayer}
+                visualControls={visualControls}
                 onViewportChange={(viewport) => {
                   setViewportLabel(
                     `x:${viewport.x.toFixed(1)} y:${viewport.y.toFixed(1)} z:${viewport.scale.toFixed(2)}`,
@@ -516,7 +509,8 @@ function App() {
                 ? 'BRICK JSON-LD (Canonical)'
                 : 'TypeScript Fixture'}
           </p>
-          <p>View: {showDualMaps ? '2D + 2.5D side by side' : mapView === 'ortho' ? '2.5D Ortho' : '2D Plan'}</p>
+          <p>View: {showDualMaps ? '2D + 2.5D side by side' : '2D Plan'}</p>
+          <p>Room labels: {labelPosition}</p>
           <p>Use mouse wheel to zoom and drag to pan.</p>
         </article>
 

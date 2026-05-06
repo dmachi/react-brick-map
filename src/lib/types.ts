@@ -162,6 +162,16 @@ export type RotationControl = {
   startTimeMs?: number;
 };
 
+export type SpaceLabelPosition =
+  | 'center'
+  | 'center-top'
+  | 'center-bottom'
+  | 'center-right'
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right';
+
 export type SpaceVisualOverride = {
   fill?: string;
   fillHover?: string;
@@ -185,6 +195,8 @@ export type AssetVisualOverride = {
 export type LabelOptions = {
   /** Show room type label when there is no room label. Defaults to false. */
   showRoomTypeWhenNoLabel?: boolean;
+  /** Position for room labels. Defaults to `center`. */
+  spaceLabelPosition?: SpaceLabelPosition;
 };
 
 export type VisualControlState = {

@@ -32,6 +32,8 @@ import {
   getPrimaryRing,
   makeGradientStops,
   resolveLayerPosition,
+  resolveSpaceLabelBoxGeometry,
+  resolveSpaceLabelLayout,
 } from './geometryUtils';
 import {
   buildExtrudedWallQuads,
@@ -1207,36 +1209,6 @@ export function OrthoBuilding({
               }),
             ])}
 
-            {/* Pass 6: labels */}
-            {projectedSpaces.map((entry) => (
-              <Group key={`label-${entry.space.id}`} listening={false}>
-                {entry.typeLabel && !entry.space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
-                  <Text
-                    x={entry.planBbox.minX}
-                    y={entry.centroid.y}
-                    text={entry.typeLabel}
-                    fontSize={8 / viewport.scale}
-                    fill={entry.visualStyle.iconColor ?? entry.visualStyle.labelColor}
-                    width={(entry.planBbox.maxX - entry.planBbox.minX)}
-                    align="center"
-                    offsetY={(8 / 2) / viewport.scale}
-                  />
-                ) : null}
-                {entry.space.hasExplicitLabel ? (
-                  <Text
-                    x={entry.planBbox.minX}
-                    y={entry.centroid.y}
-                    text={entry.space.label}
-                    fontSize={12 / viewport.scale}
-                    fill={entry.visualStyle.labelColor}
-                    width={(entry.planBbox.maxX - entry.planBbox.minX)}
-                    align="center"
-                    offsetY={(12 / 2) / viewport.scale}
-                  />
-                ) : null}
-              </Group>
-            ))}
-
             {model.assets.filter(isFloorPlanAsset).map((asset) => {
               const baseAssetStyle = resolveAssetStyle(resolvedTheme, asset);
               const assetStyle = resolveAssetVisual(asset, baseAssetStyle, visualControls, renderClockMs);
@@ -1319,6 +1291,82 @@ export function OrthoBuilding({
                 />
               );
             })}
+
+            {/* renderOrder='overlay': after all geometry, labels, assets and annotations.
+                Space overlays use the projected top-face ring. */}
+            {/* Room labels at overlay level */}
+            {projectedSpaces.map((entry) => (
+              (() => {
+                const roomLabelPosition = visualControls?.labelOptions?.spaceLabelPosition ?? 'center';
+                const typeFontSize = 8 / viewport.scale;
+                const typeLabelLayout = resolveSpaceLabelLayout(entry.bbox, typeFontSize, roomLabelPosition);
+                const roomFontSize = 12 / viewport.scale;
+                const roomLabelLayout = resolveSpaceLabelLayout(entry.bbox, roomFontSize, roomLabelPosition);
+                const typeLabelBox = entry.typeLabel
+                  ? resolveSpaceLabelBoxGeometry(typeLabelLayout, entry.typeLabel, typeFontSize)
+                  : null;
+                const roomLabelBox = resolveSpaceLabelBoxGeometry(roomLabelLayout, entry.space.label, roomFontSize);
+
+                return (
+                  <Group key={`label-${entry.space.id}`} listening={false}>
+                    {entry.typeLabel && typeLabelBox && !entry.space.hasExplicitLabel && visualControls?.labelOptions?.showRoomTypeWhenNoLabel ? (
+                      <Group listening={false}>
+                        <Rect
+                          x={typeLabelBox.rectX}
+                          y={typeLabelBox.rectY}
+                          width={typeLabelBox.rectWidth}
+                          height={typeLabelBox.rectHeight}
+                          fill="#ffffff"
+                          stroke="#9ca3af"
+                          strokeWidth={0.9 / viewport.scale}
+                          cornerRadius={2 / viewport.scale}
+                        />
+                        <Text
+                          x={typeLabelBox.textX}
+                          y={typeLabelBox.textY}
+                          text={entry.typeLabel}
+                          fontSize={typeFontSize}
+                          fill={entry.visualStyle.iconColor ?? entry.visualStyle.labelColor}
+                          width={typeLabelBox.textWidth}
+                          height={typeLabelBox.textHeight}
+                          align="center"
+                          verticalAlign="middle"
+                          wrap="word"
+                          lineHeight={1.15}
+                        />
+                      </Group>
+                    ) : null}
+                    {entry.space.hasExplicitLabel ? (
+                      <Group listening={false}>
+                        <Rect
+                          x={roomLabelBox.rectX}
+                          y={roomLabelBox.rectY}
+                          width={roomLabelBox.rectWidth}
+                          height={roomLabelBox.rectHeight}
+                          fill="#ffffff"
+                          stroke="#9ca3af"
+                          strokeWidth={0.9 / viewport.scale}
+                          cornerRadius={2 / viewport.scale}
+                        />
+                        <Text
+                          x={roomLabelBox.textX}
+                          y={roomLabelBox.textY}
+                          text={entry.space.label}
+                          fontSize={roomFontSize}
+                          fill={entry.visualStyle.labelColor}
+                          width={roomLabelBox.textWidth}
+                          height={roomLabelBox.textHeight}
+                          align="center"
+                          verticalAlign="middle"
+                          wrap="word"
+                          lineHeight={1.15}
+                        />
+                      </Group>
+                    ) : null}
+                  </Group>
+                );
+              })()
+            ))}
 
             {/* renderOrder='overlay': after all geometry, labels, assets and annotations.
                 Space overlays use the projected top-face ring. */}

@@ -66,6 +66,9 @@ Source (BRICK/REC JSON-LD or Turtle)
 import type { VisualControlState } from './lib';
 
 const visualControls: VisualControlState = {
+  labelOptions: {
+    spaceLabelPosition: 'center',
+  },
   classes: {
     spaces: {
       office: { fill: '#e0f2fe', fillSelected: '#7dd3fc' },
@@ -102,6 +105,9 @@ Visual resolution order is:
 
 For velocity-driven rotation, the component uses an internal animation clock by default.
 If `visualControls.animationClockMs` is supplied, that external clock is used instead.
+
+Room label placement is controlled by `visualControls.labelOptions.spaceLabelPosition`.
+Supported values are `center` (default), `center-top`, `center-bottom`, `center-right`, `top-left`, `top-right`, `bottom-left`, and `bottom-right`.
 
 ### Examples
 

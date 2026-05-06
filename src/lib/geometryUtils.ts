@@ -4,6 +4,7 @@ import type {
   CanonicalBuildingMapModel,
   LayerPosition,
   Ring,
+  SpaceLabelPosition,
   SpaceEntity,
   XY,
 } from './types';
@@ -136,6 +137,123 @@ export function flattenRing(ring: Ring): number[] {
 export function flattenRings(rings: Ring[]): number[] {
   const outer = rings[0] ?? [];
   return flattenRing(outer);
+}
+
+export function resolveSpaceLabelLayout(
+  bbox: { minX: number; minY: number; maxX: number; maxY: number },
+  fontSize: number,
+  position: SpaceLabelPosition = 'center',
+): {
+  x: number;
+  y: number;
+  width: number;
+  align: 'left' | 'center' | 'right';
+  verticalAnchor: 'top' | 'center' | 'bottom';
+} {
+  const fixedWallInset = 0.75;
+  const boxWidth = Math.max(0, bbox.maxX - bbox.minX);
+  const boxHeight = Math.max(0, bbox.maxY - bbox.minY);
+  const insetX = Math.min(fixedWallInset, boxWidth / 2);
+  const insetY = Math.min(fixedWallInset, boxHeight / 2);
+  const x = bbox.minX + insetX;
+  const width = Math.max(0, boxWidth - insetX * 2);
+  const centerY = bbox.minY + boxHeight / 2 - fontSize / 2;
+  const topY = bbox.minY + insetY;
+  const bottomY = bbox.maxY - insetY - fontSize;
+
+  switch (position) {
+    case 'center-top':
+      return { x, y: topY, width, align: 'center', verticalAnchor: 'top' };
+    case 'center-bottom':
+      return { x, y: bottomY, width, align: 'center', verticalAnchor: 'bottom' };
+    case 'center-right':
+      return { x, y: centerY, width, align: 'right', verticalAnchor: 'center' };
+    case 'top-left':
+      return { x, y: topY, width, align: 'left', verticalAnchor: 'top' };
+    case 'top-right':
+      return { x, y: topY, width, align: 'right', verticalAnchor: 'top' };
+    case 'bottom-left':
+      return { x, y: bottomY, width, align: 'left', verticalAnchor: 'bottom' };
+    case 'bottom-right':
+      return { x, y: bottomY, width, align: 'right', verticalAnchor: 'bottom' };
+    case 'center':
+    default:
+      return { x, y: centerY, width, align: 'center', verticalAnchor: 'center' };
+  }
+}
+
+export function resolveSpaceLabelBoxGeometry(
+  layout: {
+    x: number;
+    y: number;
+    width: number;
+    align: 'left' | 'center' | 'right';
+    verticalAnchor: 'top' | 'center' | 'bottom';
+  },
+  text: string,
+  fontSize: number,
+): {
+  textX: number;
+  textY: number;
+  textWidth: number;
+  textHeight: number;
+  rectX: number;
+  rectY: number;
+  rectWidth: number;
+  rectHeight: number;
+} {
+  const lineHeightMultiplier = 1.15;
+  const averageCharWidth = fontSize * 0.56;
+  const paddingX = fontSize * 0.35;
+  const paddingY = fontSize * 0.22;
+  const maxContentWidth = Math.max(1, layout.width - paddingX * 2);
+  const maxCharsPerLine = Math.max(1, Math.floor(maxContentWidth / Math.max(averageCharWidth, 1e-6)));
+
+  const sourceLines = text.split('\n');
+  let lineCount = 0;
+  let maxLineChars = 1;
+  for (const sourceLine of sourceLines) {
+    const chars = Math.max(1, sourceLine.length);
+    const wrappedLineCount = Math.max(1, Math.ceil(chars / maxCharsPerLine));
+    lineCount += wrappedLineCount;
+    maxLineChars = Math.max(maxLineChars, Math.min(chars, maxCharsPerLine));
+  }
+
+  const estimatedLineWidth = maxLineChars * averageCharWidth;
+  const contentWidth = Math.max(fontSize * 1.5, Math.min(maxContentWidth, estimatedLineWidth));
+  const contentHeight = Math.max(fontSize, lineCount * fontSize * lineHeightMultiplier);
+  const rectWidth = contentWidth + paddingX * 2;
+  const rectHeight = contentHeight + paddingY * 2;
+
+  let rectX = layout.x;
+  if (layout.align === 'center') {
+    rectX = layout.x + (layout.width - rectWidth) / 2;
+  } else if (layout.align === 'right') {
+    rectX = layout.x + layout.width - rectWidth;
+  }
+
+  const anchorCenterY = layout.y + fontSize / 2;
+  const anchorBottomY = layout.y + fontSize;
+  let rectY = layout.y - paddingY;
+  if (layout.verticalAnchor === 'center') {
+    rectY = anchorCenterY - rectHeight / 2;
+  } else if (layout.verticalAnchor === 'bottom') {
+    rectY = anchorBottomY - contentHeight - paddingY;
+  }
+
+  const textX = rectX + paddingX;
+  const textY = rectY + paddingY;
+
+  return {
+    textX,
+    textY,
+    textWidth: contentWidth,
+    textHeight: contentHeight,
+    rectX,
+    rectY,
+    rectWidth,
+    rectHeight,
+  };
 }
 
 export type WallFrame = {
