@@ -33,6 +33,29 @@ import {
 } from './visualControls';
 import { renderIconAt } from './iconRendering';
 
+let markerLabelMeasureContext: CanvasRenderingContext2D | null | undefined;
+
+function measureMarkerLabelWidth(text: string, fontSize: number): number {
+  if (typeof document === 'undefined') {
+    return Math.max(fontSize * 1.2, text.length * fontSize * 0.62 * 1.15);
+  }
+
+  if (markerLabelMeasureContext === undefined) {
+    const canvas = document.createElement('canvas');
+    markerLabelMeasureContext = canvas.getContext('2d');
+  }
+
+  if (!markerLabelMeasureContext) {
+    return Math.max(fontSize * 1.2, text.length * fontSize * 0.62 * 1.15);
+  }
+
+  markerLabelMeasureContext.font = `${fontSize}px sans-serif`;
+  return Math.max(
+    fontSize * 1.2,
+    markerLabelMeasureContext.measureText(text).width * 1.15 + fontSize * 0.35,
+  );
+}
+
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
 };
@@ -437,6 +460,32 @@ function markerHalfExtents(
   const shapeHy = shape === 'circle' ? r : h / 2;
 
   return { hx: shapeHx, hy: shapeHy };
+}
+
+function markerIconHalfHeight(item: MarkerLayerItem, scale: number): number {
+  const iconSpec = normalizeLayerIconSpec(item.icon);
+  if (!iconSpec) {
+    return 0;
+  }
+
+  if (iconSpec.kind === 'svg-path') {
+    return (iconSpec.height ?? 10) / (2 * scale);
+  }
+  if (iconSpec.kind === 'image') {
+    return (iconSpec.height ?? 14) / (2 * scale);
+  }
+  return (6 / scale) / 2;
+}
+
+function markerLabelLayout(item: MarkerLayerItem, scale: number): { width: number; yOffset: number; fontSize: number } {
+  const fontSize = 9 / scale;
+  const width = measureMarkerLabelWidth(item.label ?? '', fontSize);
+  const shape = item.shape ?? 'circle';
+  const radius = (item.radius ?? 5) / scale;
+  const shapeHeight = (item.height ?? (item.radius ?? 5) * 2) / scale;
+  const shapeHalfHeight = shape === 'circle' ? radius : shapeHeight / 2;
+  const yOffset = Math.max(shapeHalfHeight, markerIconHalfHeight(item, scale)) + 8 / scale;
+  return { width, yOffset, fontSize };
 }
 
 type WallFrame = {
@@ -1342,6 +1391,9 @@ export function BuildingMap({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const labelLayout = item.showLabel && item.label
+                  ? markerLabelLayout(item, viewport.scale)
+                  : null;
                 return (
                   <Group key={`fl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
@@ -1370,13 +1422,15 @@ export function BuildingMap({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x}
-                        y={pt.y + (r + 8) / viewport.scale}
+                        x={pt.x - (labelLayout?.width ?? 0) / 2}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.fontSize ?? 0)}
                         text={item.label}
-                        fontSize={9 / viewport.scale}
-                        fill={item.labelColor ?? '#1f2937'}
+                        fontSize={labelLayout?.fontSize}
+                        width={labelLayout?.width}
+                        fill="#000000"
+                        fontStyle="bold"
                         align="center"
-                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        wrap="none"
                         listening={false}
                       />
                     ) : null}
@@ -1411,11 +1465,11 @@ export function BuildingMap({
               const baseSpaceStyle = resolveSpaceStyle(resolvedTheme, space);
               const spaceStyle = resolveSpaceVisual(space, baseSpaceStyle, visualControls);
 
-              const fill = isSelected
-                ? spaceStyle.fillSelected
-                : isHovered
-                  ? spaceStyle.fillHover
-                  : spaceStyle.fill;
+              const fill = isHovered
+                ? spaceStyle.fillHover
+                : spaceStyle.fill;
+              const wallStroke = isSelected ? spaceStyle.fillSelected : spaceStyle.stroke;
+              const wallStrokeWidth = isSelected ? 2.4 / viewport.scale : 1 / viewport.scale;
 
               if (space.geometry.type === 'Polygon') {
                 const bbox = computeBoundingBox(space.geometry.rings[0] ?? []);
@@ -1428,8 +1482,8 @@ export function BuildingMap({
                       fillLinearGradientStartPoint={{ x: bbox.minX, y: bbox.minY }}
                       fillLinearGradientEndPoint={{ x: bbox.maxX, y: bbox.maxY }}
                       fillLinearGradientColorStops={gradientStops}
-                      stroke={spaceStyle.stroke}
-                      strokeWidth={1 / viewport.scale}
+                      stroke={wallStroke}
+                      strokeWidth={wallStrokeWidth}
                       shadowColor="rgba(0,0,0,0.22)"
                       shadowBlur={12 / viewport.scale}
                       shadowOffsetX={3 / viewport.scale}
@@ -1455,8 +1509,8 @@ export function BuildingMap({
                     fillLinearGradientStartPoint={{ x: polyBbox.minX, y: polyBbox.minY }}
                     fillLinearGradientEndPoint={{ x: polyBbox.maxX, y: polyBbox.maxY }}
                     fillLinearGradientColorStops={polyGradientStops}
-                    stroke={spaceStyle.stroke}
-                    strokeWidth={1 / viewport.scale}
+                    stroke={wallStroke}
+                    strokeWidth={wallStrokeWidth}
                     shadowColor="rgba(0,0,0,0.22)"
                     shadowBlur={12 / viewport.scale}
                     shadowOffsetX={3 / viewport.scale}
@@ -1493,6 +1547,9 @@ export function BuildingMap({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const labelLayout = item.showLabel && item.label
+                  ? markerLabelLayout(item, viewport.scale)
+                  : null;
                 const markerIndex = (data.markers ?? []).findIndex((m) => m.id === item.id);
                 if (markerIndex >= 0 && markerIndex < 3) {
                   console.info('[layer-debug][BuildingMap][walls-markers] projected marker', {
@@ -1529,13 +1586,15 @@ export function BuildingMap({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x}
-                        y={pt.y + (r + 8) / viewport.scale}
+                        x={pt.x - (labelLayout?.width ?? 0) / 2}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.fontSize ?? 0)}
                         text={item.label}
-                        fontSize={9 / viewport.scale}
-                        fill={item.labelColor ?? '#1f2937'}
+                        fontSize={labelLayout?.fontSize}
+                        width={labelLayout?.width}
+                        fill="#000000"
+                        fontStyle="bold"
                         align="center"
-                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        wrap="none"
                         listening={false}
                       />
                     ) : null}
@@ -1725,7 +1784,7 @@ export function BuildingMap({
                     (() => {
                       const fontSize = 8 / viewport.scale;
                       const labelLayout = resolveSpaceLabelLayout(bbox, fontSize, roomLabelPosition);
-                      const labelBox = resolveSpaceLabelBoxGeometry(labelLayout, spaceTypeLabel, fontSize);
+                      const labelBox = resolveSpaceLabelBoxGeometry(labelLayout, spaceTypeLabel, fontSize, 1.15);
                       return (
                         <>
                           <Rect
@@ -1816,6 +1875,9 @@ export function BuildingMap({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const labelLayout = item.showLabel && item.label
+                  ? markerLabelLayout(item, viewport.scale)
+                  : null;
                 return (
                   <Group key={`ov-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
@@ -1844,13 +1906,15 @@ export function BuildingMap({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x}
-                        y={pt.y + (r + 8) / viewport.scale}
+                        x={pt.x - (labelLayout?.width ?? 0) / 2}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.fontSize ?? 0)}
                         text={item.label}
-                        fontSize={9 / viewport.scale}
-                        fill={item.labelColor ?? '#1f2937'}
+                        fontSize={labelLayout?.fontSize}
+                        width={labelLayout?.width}
+                        fill="#000000"
+                        fontStyle="bold"
                         align="center"
-                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        wrap="none"
                         listening={false}
                       />
                     ) : null}

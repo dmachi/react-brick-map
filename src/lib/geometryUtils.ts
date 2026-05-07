@@ -192,6 +192,7 @@ export function resolveSpaceLabelBoxGeometry(
   },
   text: string,
   fontSize: number,
+  widthScale = 1,
 ): {
   textX: number;
   textY: number;
@@ -206,7 +207,8 @@ export function resolveSpaceLabelBoxGeometry(
   const averageCharWidth = fontSize * 0.56;
   const paddingX = fontSize * 0.35;
   const paddingY = fontSize * 0.22;
-  const maxContentWidth = Math.max(1, layout.width - paddingX * 2);
+  const scaledLayoutWidth = Math.max(1, layout.width * widthScale);
+  const maxContentWidth = Math.max(1, scaledLayoutWidth - paddingX * 2);
   const maxCharsPerLine = Math.max(1, Math.floor(maxContentWidth / Math.max(averageCharWidth, 1e-6)));
 
   const sourceLines = text.split('\n');
@@ -227,9 +229,9 @@ export function resolveSpaceLabelBoxGeometry(
 
   let rectX = layout.x;
   if (layout.align === 'center') {
-    rectX = layout.x + (layout.width - rectWidth) / 2;
+    rectX = layout.x + (scaledLayoutWidth - rectWidth) / 2;
   } else if (layout.align === 'right') {
-    rectX = layout.x + layout.width - rectWidth;
+    rectX = layout.x + scaledLayoutWidth - rectWidth;
   }
 
   const anchorCenterY = layout.y + fontSize / 2;

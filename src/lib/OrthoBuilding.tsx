@@ -60,6 +60,29 @@ function countLayerDataItems(data: LayerData) {
 
 export type OrthoBuildingProps = BuildingMapProps;
 
+let markerLabelMeasureContext: CanvasRenderingContext2D | null | undefined;
+
+function measureMarkerLabelWidth(text: string, fontSize: number): number {
+  if (typeof document === 'undefined') {
+    return Math.max(fontSize * 1.2, text.length * fontSize * 0.62 * 1.15);
+  }
+
+  if (markerLabelMeasureContext === undefined) {
+    const canvas = document.createElement('canvas');
+    markerLabelMeasureContext = canvas.getContext('2d');
+  }
+
+  if (!markerLabelMeasureContext) {
+    return Math.max(fontSize * 1.2, text.length * fontSize * 0.62 * 1.15);
+  }
+
+  markerLabelMeasureContext.font = `${fontSize}px sans-serif`;
+  return Math.max(
+    fontSize * 1.2,
+    markerLabelMeasureContext.measureText(text).width * 1.15 + fontSize * 0.35,
+  );
+}
+
 function makeTransformForPoints(points: XY[], width: number, height: number, padding: number) {
   if (points.length === 0) {
     return {
@@ -571,7 +594,7 @@ export function OrthoBuilding({
         const visualStyle = resolveSpaceVisual(space, style, visualControls);
         const isSelected = selectedSpaceId === space.id;
         const isHovered = hoveredSpaceId === space.id;
-        const fill = isSelected ? visualStyle.fillSelected : isHovered ? visualStyle.fillHover : visualStyle.fill;
+        const fill = isHovered ? visualStyle.fillHover : visualStyle.fill;
         const typeLabel = getIconText(visualStyle.iconSpec) ?? formatBrickTypeLabel(space.brickClass) ?? visualStyle.icon;
 
         const topRing = projectRingTopFace(ring, DEFAULT_ORTHO_DEPTH, undefined, projectionContext);
@@ -596,10 +619,13 @@ export function OrthoBuilding({
           centroid.y - projectionContext.center.y,
         );
         const radialNorm = Math.min(1, depthScore / Math.max(projectionContext.maxRadius, 1e-6));
+        const wallAccent = visualStyle.fillSelected;
         const interiorWallOpacity = isSelected
           ? 0.62 + radialNorm * 0.2
           : 0.22 + radialNorm * 0.52;
-        const wallFaceFill = isSelected ? '#9fa8b3' : '#8f98a3';
+        const wallFaceFill = isSelected ? shadeHex(wallAccent, 18) : '#8f98a3';
+        const wallStroke = isSelected ? shadeHex(wallAccent, -26) : '#4b5563';
+        const wallCapFill = isSelected ? shadeHex(wallAccent, 52) : '#d8dde3';
         const floorFill = shadeHex(fill, 12);
 
         return {
@@ -619,6 +645,8 @@ export function OrthoBuilding({
           radialNorm,
           interiorWallOpacity,
           wallFaceFill,
+          wallStroke,
+          wallCapFill,
           floorFill,
         };
       })
@@ -964,6 +992,20 @@ export function OrthoBuilding({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const labelFontSize = 9 / viewport.scale;
+                const labelWidth = item.showLabel && item.label
+                  ? measureMarkerLabelWidth(item.label, labelFontSize)
+                  : 0;
+                const iconSpec = normalizeLayerIconSpec(item.icon);
+                const iconHalfHeight = !iconSpec
+                  ? 0
+                  : iconSpec.kind === 'svg-path'
+                    ? (iconSpec.height ?? 10) / (2 * viewport.scale)
+                    : iconSpec.kind === 'image'
+                      ? (iconSpec.height ?? 14) / (2 * viewport.scale)
+                      : (6 / viewport.scale) / 2;
+                const shapeHalfHeight = shape === 'circle' ? r : h / 2;
+                const labelYOffset = Math.max(shapeHalfHeight, iconHalfHeight) + 8 / viewport.scale;
                 const markerIndex = (data.markers ?? []).findIndex((m) => m.id === item.id);
                 if (markerIndex >= 0 && markerIndex < 3) {
                   console.info('[layer-debug][OrthoBuilding][walls-markers] projected marker', {
@@ -1001,13 +1043,15 @@ export function OrthoBuilding({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x}
-                        y={pt.y + (r + 8) / viewport.scale}
+                        x={pt.x - labelWidth / 2}
+                        y={pt.y - labelYOffset - labelFontSize}
                         text={item.label}
-                        fontSize={9 / viewport.scale}
-                        fill={item.labelColor ?? '#1f2937'}
+                        fontSize={labelFontSize}
+                        width={labelWidth}
+                        fill="#000000"
+                        fontStyle="bold"
                         align="center"
-                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        wrap="none"
                         listening={false}
                       />
                     ) : null}
@@ -1038,8 +1082,6 @@ export function OrthoBuilding({
 
             {/* Passes 2–5: wall faces, edge lines, wall caps */}
             {(() => {
-              const wallStroke = '#4b5563';
-              const wallCap = '#d8dde3';
               const wallCapThickness = 0.22;
               return (
                 <>
@@ -1051,8 +1093,8 @@ export function OrthoBuilding({
                         points={flattenQuad([wall.a, wall.b, wall.topB, wall.topA])}
                         closed
                         fill={entry.wallFaceFill}
-                        stroke={wallStroke}
-                        strokeWidth={0.75 / viewport.scale}
+                        stroke={entry.wallStroke}
+                        strokeWidth={(entry.isSelected ? 1.15 : 0.75) / viewport.scale}
                         opacity={wall.visible ? entry.interiorWallOpacity : Math.max(0.14, entry.interiorWallOpacity * 0.42)}
                         onMouseEnter={() => setHoveredSpaceId(entry.space.id)}
                         onMouseLeave={() => setHoveredSpaceId(null)}
@@ -1067,10 +1109,10 @@ export function OrthoBuilding({
                       <Line
                         key={`wall-base-${entry.space.id}-${wall.id}`}
                         points={flattenQuad([wall.a, wall.b])}
-                        stroke={wallStroke}
-                        strokeWidth={1 / viewport.scale}
+                        stroke={entry.wallStroke}
+                        strokeWidth={(entry.isSelected ? 1.45 : 1) / viewport.scale}
                         lineCap="round"
-                        opacity={wall.visible ? 0.95 : 0.38}
+                        opacity={wall.visible ? (entry.isSelected ? 1 : 0.95) : (entry.isSelected ? 0.6 : 0.38)}
                         listening={false}
                       />
                     ))
@@ -1086,14 +1128,14 @@ export function OrthoBuilding({
                       >
                         <Line
                           points={flattenQuad([wall.a, wall.topA])}
-                          stroke={wallStroke}
-                          strokeWidth={0.7 / viewport.scale}
+                          stroke={entry.wallStroke}
+                          strokeWidth={(entry.isSelected ? 1.05 : 0.7) / viewport.scale}
                           lineCap="round"
                         />
                         <Line
                           points={flattenQuad([wall.b, wall.topB])}
-                          stroke={wallStroke}
-                          strokeWidth={0.7 / viewport.scale}
+                          stroke={entry.wallStroke}
+                          strokeWidth={(entry.isSelected ? 1.05 : 0.7) / viewport.scale}
                           lineCap="round"
                         />
                       </Group>
@@ -1106,18 +1148,18 @@ export function OrthoBuilding({
                       <Group key={`wall-top-cap-${entry.space.id}-${wall.id}`} listening={false}>
                         <Line
                           points={flattenQuad([wall.topA, wall.topB])}
-                          stroke={wallStroke}
-                          strokeWidth={0.9 / viewport.scale}
+                          stroke={entry.wallStroke}
+                          strokeWidth={(entry.isSelected ? 1.25 : 0.9) / viewport.scale}
                           lineCap="round"
-                          opacity={wall.visible ? 0.95 : 0.42}
+                          opacity={wall.visible ? (entry.isSelected ? 1 : 0.95) : (entry.isSelected ? 0.64 : 0.42)}
                         />
                         <Line
                           points={flattenQuad(buildWallCapQuad(wall.topA, wall.topB, entry.centroid, wallCapThickness))}
                           closed
-                          fill={wallCap}
-                          stroke={wallStroke}
-                          strokeWidth={0.6 / viewport.scale}
-                          opacity={wall.visible ? 0.9 : 0.32}
+                          fill={entry.wallCapFill}
+                          stroke={entry.wallStroke}
+                          strokeWidth={(entry.isSelected ? 0.9 : 0.6) / viewport.scale}
+                          opacity={wall.visible ? (entry.isSelected ? 0.96 : 0.9) : (entry.isSelected ? 0.52 : 0.32)}
                         />
                       </Group>
                     ))
@@ -1146,6 +1188,20 @@ export function OrthoBuilding({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const labelFontSize = 9 / viewport.scale;
+                const labelWidth = item.showLabel && item.label
+                  ? measureMarkerLabelWidth(item.label, labelFontSize)
+                  : 0;
+                const iconSpec = normalizeLayerIconSpec(item.icon);
+                const iconHalfHeight = !iconSpec
+                  ? 0
+                  : iconSpec.kind === 'svg-path'
+                    ? (iconSpec.height ?? 10) / (2 * viewport.scale)
+                    : iconSpec.kind === 'image'
+                      ? (iconSpec.height ?? 14) / (2 * viewport.scale)
+                      : (6 / viewport.scale) / 2;
+                const shapeHalfHeight = shape === 'circle' ? r : h / 2;
+                const labelYOffset = Math.max(shapeHalfHeight, iconHalfHeight) + 8 / viewport.scale;
                 return (
                   <Group key={`wl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
@@ -1174,13 +1230,15 @@ export function OrthoBuilding({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x}
-                        y={pt.y + (r + 8) / viewport.scale}
+                        x={pt.x - labelWidth / 2}
+                        y={pt.y - labelYOffset - labelFontSize}
                         text={item.label}
-                        fontSize={9 / viewport.scale}
-                        fill={item.labelColor ?? '#1f2937'}
+                        fontSize={labelFontSize}
+                        width={labelWidth}
+                        fill="#000000"
+                        fontStyle="bold"
                         align="center"
-                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        wrap="none"
                         listening={false}
                       />
                     ) : null}
@@ -1303,7 +1361,7 @@ export function OrthoBuilding({
                 const roomFontSize = 12 / viewport.scale;
                 const roomLabelLayout = resolveSpaceLabelLayout(entry.bbox, roomFontSize, roomLabelPosition);
                 const typeLabelBox = entry.typeLabel
-                  ? resolveSpaceLabelBoxGeometry(typeLabelLayout, entry.typeLabel, typeFontSize)
+                  ? resolveSpaceLabelBoxGeometry(typeLabelLayout, entry.typeLabel, typeFontSize, 1.15)
                   : null;
                 const roomLabelBox = resolveSpaceLabelBoxGeometry(roomLabelLayout, entry.space.label, roomFontSize);
 
@@ -1387,6 +1445,20 @@ export function OrthoBuilding({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
+                const labelFontSize = 9 / viewport.scale;
+                const labelWidth = item.showLabel && item.label
+                  ? measureMarkerLabelWidth(item.label, labelFontSize)
+                  : 0;
+                const iconSpec = normalizeLayerIconSpec(item.icon);
+                const iconHalfHeight = !iconSpec
+                  ? 0
+                  : iconSpec.kind === 'svg-path'
+                    ? (iconSpec.height ?? 10) / (2 * viewport.scale)
+                    : iconSpec.kind === 'image'
+                      ? (iconSpec.height ?? 14) / (2 * viewport.scale)
+                      : (6 / viewport.scale) / 2;
+                const shapeHalfHeight = shape === 'circle' ? r : h / 2;
+                const labelYOffset = Math.max(shapeHalfHeight, iconHalfHeight) + 8 / viewport.scale;
                 return (
                   <Group key={`ov-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
@@ -1415,13 +1487,15 @@ export function OrthoBuilding({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x}
-                        y={pt.y + (r + 8) / viewport.scale}
+                        x={pt.x - labelWidth / 2}
+                        y={pt.y - labelYOffset - labelFontSize}
                         text={item.label}
-                        fontSize={9 / viewport.scale}
-                        fill={item.labelColor ?? '#1f2937'}
+                        fontSize={labelFontSize}
+                        width={labelWidth}
+                        fill="#000000"
+                        fontStyle="bold"
                         align="center"
-                        offsetX={(item.label.length * 2.5) / viewport.scale}
+                        wrap="none"
                         listening={false}
                       />
                     ) : null}

@@ -2,6 +2,26 @@ import { Image as KonvaImage, Path, Text } from 'react-konva';
 import type { IconSpec } from './types';
 import { isImageIcon } from './visualControls';
 
+let textMeasureContext: CanvasRenderingContext2D | null | undefined;
+
+function measureTextWidth(text: string, fontSize: number): number {
+  if (typeof document === 'undefined') {
+    return Math.max(fontSize * 1.2, text.length * fontSize * 0.62);
+  }
+
+  if (textMeasureContext === undefined) {
+    const canvas = document.createElement('canvas');
+    textMeasureContext = canvas.getContext('2d');
+  }
+
+  if (!textMeasureContext) {
+    return Math.max(fontSize * 1.2, text.length * fontSize * 0.62);
+  }
+
+  textMeasureContext.font = `${fontSize}px sans-serif`;
+  return Math.max(fontSize * 1.2, textMeasureContext.measureText(text).width + fontSize * 0.35);
+}
+
 /**
  * Renders a Konva node for an `IconSpec` at the given plan/screen-space point.
  *
@@ -28,15 +48,18 @@ export function renderIconAt(
   }
 
   if (icon.kind === 'text') {
+    const fontSize = 6 / scale;
+    const textHalfWidth = measureTextWidth(icon.text, fontSize) / 2;
     return (
       <Text
         x={x}
         y={y}
         text={icon.text}
-        fontSize={6 / scale}
+        fontSize={fontSize}
         fill={fallbackColor}
-        offsetX={2 / scale}
-        offsetY={2 / scale}
+        offsetX={textHalfWidth}
+        offsetY={fontSize / 2}
+        wrap="none"
       />
     );
   }
