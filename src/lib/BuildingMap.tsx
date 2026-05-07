@@ -56,6 +56,10 @@ function measureMarkerLabelWidth(text: string, fontSize: number): number {
   );
 }
 
+function measureLongestWordWidth(text: string, fontSize: number): number {
+  return Math.max(...text.split(/\s+/).map((w) => measureMarkerLabelWidth(w, fontSize)));
+}
+
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
 };
@@ -477,15 +481,40 @@ function markerIconHalfHeight(item: MarkerLayerItem, scale: number): number {
   return (6 / scale) / 2;
 }
 
-function markerLabelLayout(item: MarkerLayerItem, scale: number): { width: number; yOffset: number; fontSize: number } {
+function markerIconHalfWidth(item: MarkerLayerItem, scale: number): number {
+  const iconSpec = normalizeLayerIconSpec(item.icon);
+  if (!iconSpec) {
+    return 0;
+  }
+
+  if (iconSpec.kind === 'svg-path') {
+    return (iconSpec.width ?? 10) / (2 * scale);
+  }
+  if (iconSpec.kind === 'image') {
+    return (iconSpec.width ?? 14) / (2 * scale);
+  }
+  return (6 / scale) / 2;
+}
+
+function markerLabelLayout(item: MarkerLayerItem, scale: number): { width: number; yOffset: number; fontSize: number; lineHeight: number; height: number } {
   const fontSize = 9 / scale;
-  const width = measureMarkerLabelWidth(item.label ?? '', fontSize);
   const shape = item.shape ?? 'circle';
   const radius = (item.radius ?? 5) / scale;
+  const shapeWidth = (item.width ?? (item.radius ?? 5) * 2) / scale;
   const shapeHeight = (item.height ?? (item.radius ?? 5) * 2) / scale;
+  const shapeHalfWidth = shape === 'circle' ? radius : shapeWidth / 2;
   const shapeHalfHeight = shape === 'circle' ? radius : shapeHeight / 2;
-  const yOffset = Math.max(shapeHalfHeight, markerIconHalfHeight(item, scale)) + 8 / scale;
-  return { width, yOffset, fontSize };
+  const iconHalfWidth = markerIconHalfWidth(item, scale);
+  const iconBoxWidth = Math.max(shapeHalfWidth, iconHalfWidth) * 2;
+  const maxWidth = iconBoxWidth * 1.20;
+  const fullTextWidth = measureMarkerLabelWidth(item.label ?? '', fontSize);
+  const longestWordWidth = measureLongestWordWidth(item.label ?? '', fontSize);
+  const width = Math.max(longestWordWidth, Math.min(fullTextWidth, maxWidth));
+  const lineHeight = 1.15;
+  const lines = fullTextWidth <= width ? 1 : 2;
+  const height = fontSize * lineHeight * lines;
+  const yOffset = Math.max(shapeHalfHeight, markerIconHalfHeight(item, scale)) + 10 / scale;
+  return { width, yOffset, fontSize, lineHeight, height };
 }
 
 type WallFrame = {
@@ -1423,14 +1452,17 @@ export function BuildingMap({
                     {item.showLabel && item.label ? (
                       <Text
                         x={pt.x - (labelLayout?.width ?? 0) / 2}
-                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.fontSize ?? 0)}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.height ?? 0)}
                         text={item.label}
                         fontSize={labelLayout?.fontSize}
                         width={labelLayout?.width}
+                        height={labelLayout?.height}
                         fill="#000000"
                         fontStyle="bold"
                         align="center"
-                        wrap="none"
+                        lineHeight={labelLayout?.lineHeight}
+                        wrap="word"
+                        ellipsis
                         listening={false}
                       />
                     ) : null}
@@ -1587,14 +1619,17 @@ export function BuildingMap({
                     {item.showLabel && item.label ? (
                       <Text
                         x={pt.x - (labelLayout?.width ?? 0) / 2}
-                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.fontSize ?? 0)}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.height ?? 0)}
                         text={item.label}
                         fontSize={labelLayout?.fontSize}
                         width={labelLayout?.width}
+                        height={labelLayout?.height}
                         fill="#000000"
                         fontStyle="bold"
                         align="center"
-                        wrap="none"
+                        lineHeight={labelLayout?.lineHeight}
+                        wrap="word"
+                        ellipsis
                         listening={false}
                       />
                     ) : null}
@@ -1907,14 +1942,17 @@ export function BuildingMap({
                     {item.showLabel && item.label ? (
                       <Text
                         x={pt.x - (labelLayout?.width ?? 0) / 2}
-                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.fontSize ?? 0)}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.height ?? 0)}
                         text={item.label}
                         fontSize={labelLayout?.fontSize}
                         width={labelLayout?.width}
+                        height={labelLayout?.height}
                         fill="#000000"
                         fontStyle="bold"
                         align="center"
-                        wrap="none"
+                        lineHeight={labelLayout?.lineHeight}
+                        wrap="word"
+                        ellipsis
                         listening={false}
                       />
                     ) : null}

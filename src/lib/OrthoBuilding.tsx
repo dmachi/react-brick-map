@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
-import type { AssetEntity, LayerData, LayerDataContext, LayerPosition, XY } from './types';
+import type { AssetEntity, LayerData, LayerDataContext, LayerPosition, MarkerLayerItem, XY } from './types';
 import { createRdfStore } from './rdfStore';
 import type { BuildingMapProps } from './BuildingMap';
 import {
@@ -81,6 +81,61 @@ function measureMarkerLabelWidth(text: string, fontSize: number): number {
     fontSize * 1.2,
     markerLabelMeasureContext.measureText(text).width * 1.15 + fontSize * 0.35,
   );
+}
+
+function measureLongestWordWidth(text: string, fontSize: number): number {
+  return Math.max(...text.split(/\s+/).map((w) => measureMarkerLabelWidth(w, fontSize)));
+}
+
+function markerIconHalfHeight(item: MarkerLayerItem, scale: number): number {
+  const iconSpec = normalizeLayerIconSpec(item.icon);
+  if (!iconSpec) {
+    return 0;
+  }
+
+  if (iconSpec.kind === 'svg-path') {
+    return (iconSpec.height ?? 10) / (2 * scale);
+  }
+  if (iconSpec.kind === 'image') {
+    return (iconSpec.height ?? 14) / (2 * scale);
+  }
+  return (6 / scale) / 2;
+}
+
+function markerIconHalfWidth(item: MarkerLayerItem, scale: number): number {
+  const iconSpec = normalizeLayerIconSpec(item.icon);
+  if (!iconSpec) {
+    return 0;
+  }
+
+  if (iconSpec.kind === 'svg-path') {
+    return (iconSpec.width ?? 10) / (2 * scale);
+  }
+  if (iconSpec.kind === 'image') {
+    return (iconSpec.width ?? 14) / (2 * scale);
+  }
+  return (6 / scale) / 2;
+}
+
+function markerLabelLayout(item: MarkerLayerItem, scale: number): { width: number; yOffset: number; fontSize: number; lineHeight: number; height: number } {
+  const fontSize = 9 / scale;
+  const shape = item.shape ?? 'circle';
+  const radius = (item.radius ?? 5) / scale;
+  const shapeWidth = (item.width ?? (item.radius ?? 5) * 2) / scale;
+  const shapeHeight = (item.height ?? (item.radius ?? 5) * 2) / scale;
+  const shapeHalfWidth = shape === 'circle' ? radius : shapeWidth / 2;
+  const shapeHalfHeight = shape === 'circle' ? radius : shapeHeight / 2;
+  const iconHalfWidth = markerIconHalfWidth(item, scale);
+  const iconBoxWidth = Math.max(shapeHalfWidth, iconHalfWidth) * 2;
+  const maxWidth = iconBoxWidth * 1.20;
+  const fullTextWidth = measureMarkerLabelWidth(item.label ?? '', fontSize);
+  const longestWordWidth = measureLongestWordWidth(item.label ?? '', fontSize);
+  const width = Math.max(longestWordWidth, Math.min(fullTextWidth, maxWidth));
+  const lineHeight = 1.15;
+  const lines = fullTextWidth <= width ? 1 : 2;
+  const height = fontSize * lineHeight * lines;
+  const yOffset = Math.max(shapeHalfHeight, markerIconHalfHeight(item, scale)) + 10 / scale;
+  return { width, yOffset, fontSize, lineHeight, height };
 }
 
 function makeTransformForPoints(points: XY[], width: number, height: number, padding: number) {
@@ -992,20 +1047,9 @@ export function OrthoBuilding({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
-                const labelFontSize = 9 / viewport.scale;
-                const labelWidth = item.showLabel && item.label
-                  ? measureMarkerLabelWidth(item.label, labelFontSize)
-                  : 0;
-                const iconSpec = normalizeLayerIconSpec(item.icon);
-                const iconHalfHeight = !iconSpec
-                  ? 0
-                  : iconSpec.kind === 'svg-path'
-                    ? (iconSpec.height ?? 10) / (2 * viewport.scale)
-                    : iconSpec.kind === 'image'
-                      ? (iconSpec.height ?? 14) / (2 * viewport.scale)
-                      : (6 / viewport.scale) / 2;
-                const shapeHalfHeight = shape === 'circle' ? r : h / 2;
-                const labelYOffset = Math.max(shapeHalfHeight, iconHalfHeight) + 8 / viewport.scale;
+                const labelLayout = item.showLabel && item.label
+                  ? markerLabelLayout(item, viewport.scale)
+                  : null;
                 const markerIndex = (data.markers ?? []).findIndex((m) => m.id === item.id);
                 if (markerIndex >= 0 && markerIndex < 3) {
                   console.info('[layer-debug][OrthoBuilding][walls-markers] projected marker', {
@@ -1043,15 +1087,18 @@ export function OrthoBuilding({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x - labelWidth / 2}
-                        y={pt.y - labelYOffset - labelFontSize}
+                        x={pt.x - (labelLayout?.width ?? 0) / 2}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.height ?? 0)}
                         text={item.label}
-                        fontSize={labelFontSize}
-                        width={labelWidth}
+                        fontSize={labelLayout?.fontSize}
+                        width={labelLayout?.width}
+                        height={labelLayout?.height}
                         fill="#000000"
                         fontStyle="bold"
                         align="center"
-                        wrap="none"
+                        lineHeight={labelLayout?.lineHeight}
+                        wrap="word"
+                        ellipsis
                         listening={false}
                       />
                     ) : null}
@@ -1188,20 +1235,9 @@ export function OrthoBuilding({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
-                const labelFontSize = 9 / viewport.scale;
-                const labelWidth = item.showLabel && item.label
-                  ? measureMarkerLabelWidth(item.label, labelFontSize)
-                  : 0;
-                const iconSpec = normalizeLayerIconSpec(item.icon);
-                const iconHalfHeight = !iconSpec
-                  ? 0
-                  : iconSpec.kind === 'svg-path'
-                    ? (iconSpec.height ?? 10) / (2 * viewport.scale)
-                    : iconSpec.kind === 'image'
-                      ? (iconSpec.height ?? 14) / (2 * viewport.scale)
-                      : (6 / viewport.scale) / 2;
-                const shapeHalfHeight = shape === 'circle' ? r : h / 2;
-                const labelYOffset = Math.max(shapeHalfHeight, iconHalfHeight) + 8 / viewport.scale;
+                const labelLayout = item.showLabel && item.label
+                  ? markerLabelLayout(item, viewport.scale)
+                  : null;
                 return (
                   <Group key={`wl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
@@ -1230,15 +1266,18 @@ export function OrthoBuilding({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x - labelWidth / 2}
-                        y={pt.y - labelYOffset - labelFontSize}
+                        x={pt.x - (labelLayout?.width ?? 0) / 2}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.height ?? 0)}
                         text={item.label}
-                        fontSize={labelFontSize}
-                        width={labelWidth}
+                        fontSize={labelLayout?.fontSize}
+                        width={labelLayout?.width}
+                        height={labelLayout?.height}
                         fill="#000000"
                         fontStyle="bold"
                         align="center"
-                        wrap="none"
+                        lineHeight={labelLayout?.lineHeight}
+                        wrap="word"
+                        ellipsis
                         listening={false}
                       />
                     ) : null}
@@ -1445,20 +1484,9 @@ export function OrthoBuilding({
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const h = (item.height ?? (item.radius ?? 5) * 2) / viewport.scale;
                 const shape = item.shape ?? 'circle';
-                const labelFontSize = 9 / viewport.scale;
-                const labelWidth = item.showLabel && item.label
-                  ? measureMarkerLabelWidth(item.label, labelFontSize)
-                  : 0;
-                const iconSpec = normalizeLayerIconSpec(item.icon);
-                const iconHalfHeight = !iconSpec
-                  ? 0
-                  : iconSpec.kind === 'svg-path'
-                    ? (iconSpec.height ?? 10) / (2 * viewport.scale)
-                    : iconSpec.kind === 'image'
-                      ? (iconSpec.height ?? 14) / (2 * viewport.scale)
-                      : (6 / viewport.scale) / 2;
-                const shapeHalfHeight = shape === 'circle' ? r : h / 2;
-                const labelYOffset = Math.max(shapeHalfHeight, iconHalfHeight) + 8 / viewport.scale;
+                const labelLayout = item.showLabel && item.label
+                  ? markerLabelLayout(item, viewport.scale)
+                  : null;
                 return (
                   <Group key={`ov-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
@@ -1487,15 +1515,18 @@ export function OrthoBuilding({
                     )}
                     {item.showLabel && item.label ? (
                       <Text
-                        x={pt.x - labelWidth / 2}
-                        y={pt.y - labelYOffset - labelFontSize}
+                        x={pt.x - (labelLayout?.width ?? 0) / 2}
+                        y={pt.y - (labelLayout?.yOffset ?? 0) - (labelLayout?.height ?? 0)}
                         text={item.label}
-                        fontSize={labelFontSize}
-                        width={labelWidth}
+                        fontSize={labelLayout?.fontSize}
+                        width={labelLayout?.width}
+                        height={labelLayout?.height}
                         fill="#000000"
                         fontStyle="bold"
                         align="center"
-                        wrap="none"
+                        lineHeight={labelLayout?.lineHeight}
+                        wrap="word"
+                        ellipsis
                         listening={false}
                       />
                     ) : null}
