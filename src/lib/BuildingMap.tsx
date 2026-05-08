@@ -198,6 +198,18 @@ function deepMerge(base: unknown, patch: unknown): unknown {
   return merged;
 }
 
+function shadeHex(hex: string, amount: number): string {
+  const match = hex.match(/^#([0-9a-f]{6})$/i);
+  if (!match) {
+    return hex;
+  }
+  const value = match[1];
+  const r = Math.min(255, Math.max(0, parseInt(value.slice(0, 2), 16) + amount));
+  const g = Math.min(255, Math.max(0, parseInt(value.slice(2, 4), 16) + amount));
+  const b = Math.min(255, Math.max(0, parseInt(value.slice(4, 6), 16) + amount));
+  return `rgb(${r},${g},${b})`;
+}
+
 function resolveTheme(
   typedOverrides?: BuildingMapThemeOverrides,
   dictionaryOverrides?: BuildingMapThemeDictionary,
@@ -1516,10 +1528,9 @@ export function BuildingMap({
               const baseSpaceStyle = resolveSpaceStyle(resolvedTheme, space);
               const spaceStyle = resolveSpaceVisual(space, baseSpaceStyle, visualControls);
 
-              const fill = isHovered
-                ? spaceStyle.fillHover
-                : spaceStyle.fill;
-              const wallStroke = isSelected ? spaceStyle.fillSelected : spaceStyle.stroke;
+              const fill = spaceStyle.fill;
+              const hoverWallStroke = shadeHex(spaceStyle.fillSelected, -30);
+              const wallStroke = isHovered ? hoverWallStroke : isSelected ? spaceStyle.fillSelected : spaceStyle.stroke;
               const wallStrokeWidth = isSelected ? 2.4 / viewport.scale : 1 / viewport.scale;
 
               if (space.geometry.type === 'Polygon') {

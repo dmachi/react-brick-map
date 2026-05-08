@@ -668,7 +668,7 @@ export function OrthoBuilding({
         const visualStyle = resolveSpaceVisual(space, style, visualControls);
         const isSelected = selectedSpaceId === space.id;
         const isHovered = hoveredSpaceId === space.id;
-        const fill = isHovered ? visualStyle.fillHover : visualStyle.fill;
+        const fill = visualStyle.fill;
         const typeLabel = getIconText(visualStyle.iconSpec) ?? formatBrickTypeLabel(space.brickClass) ?? visualStyle.icon;
 
         const topRing = projectRingTopFace(ring, DEFAULT_ORTHO_DEPTH, undefined, projectionContext);
@@ -694,12 +694,15 @@ export function OrthoBuilding({
         );
         const radialNorm = Math.min(1, depthScore / Math.max(projectionContext.maxRadius, 1e-6));
         const wallAccent = visualStyle.fillSelected;
+        const wallHoverAccent = shadeHex(wallAccent, -30);
+        const wallHighlightAccent = isHovered ? wallHoverAccent : wallAccent;
+        const isWallHighlighted = isSelected || isHovered;
         const interiorWallOpacity = isSelected
           ? 0.62 + radialNorm * 0.2
           : 0.22 + radialNorm * 0.52;
-        const wallFaceFill = isSelected ? shadeHex(wallAccent, 18) : '#8f98a3';
-        const wallStroke = isSelected ? shadeHex(wallAccent, -26) : '#4b5563';
-        const wallCapFill = isSelected ? shadeHex(wallAccent, 52) : '#d8dde3';
+        const wallFaceFill = isWallHighlighted ? shadeHex(wallHighlightAccent, 18) : '#8f98a3';
+        const wallStroke = isWallHighlighted ? shadeHex(wallHighlightAccent, -26) : '#4b5563';
+        const wallCapFill = isWallHighlighted ? shadeHex(wallHighlightAccent, 52) : '#d8dde3';
         const floorFill = shadeHex(fill, 12);
 
         return {
