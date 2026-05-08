@@ -625,11 +625,29 @@ export function OrthoBuilding({
   } : null);
   const tooltipText = activeTooltip?.text ?? '';
   const tooltipLines = tooltipText ? tooltipText.split('\n') : [];
-  const tooltipWidth = Math.max(
+  const tooltipTitle = tooltipLines[0] ?? '';
+  const tooltipBodyText = tooltipLines.slice(1).join('\n');
+  const tooltipPaddingX = 10;
+  const tooltipPaddingY = 8;
+  const tooltipTitleFontSize = 12;
+  const tooltipBodyFontSize = 11;
+  const tooltipTitleLineHeight = 1.2;
+  const tooltipBodyLineHeight = 1.28;
+  const tooltipHasBody = tooltipBodyText.length > 0;
+  const tooltipInnerWidth = Math.max(
     120,
-    ...tooltipLines.map((line) => Math.round(line.length * 6.5 + 12)),
+    ...tooltipLines.map((line, index) => Math.round(line.length * (index === 0 ? 7.1 : 6.4) + 12)),
   );
-  const tooltipHeight = Math.max(24, tooltipLines.length * 14 + 10);
+  const tooltipWidth = tooltipInnerWidth + tooltipPaddingX * 2;
+  const tooltipTitleHeight = Math.max(0, Math.round(tooltipTitleFontSize * tooltipTitleLineHeight));
+  const tooltipBodyHeight = tooltipHasBody
+    ? Math.round(tooltipBodyText.split('\n').length * tooltipBodyFontSize * tooltipBodyLineHeight)
+    : 0;
+  const tooltipDividerGap = tooltipHasBody ? 8 : 0;
+  const tooltipHeight = Math.max(
+    28,
+    tooltipPaddingY * 2 + tooltipTitleHeight + tooltipDividerGap + tooltipBodyHeight,
+  );
   const tooltipX = activeTooltip
     ? Math.min(Math.max(8, activeTooltip.x + 12), Math.max(8, stageWidth - tooltipWidth - 8))
     : 0;
@@ -1571,19 +1589,48 @@ export function OrthoBuilding({
               y={tooltipY}
               width={tooltipWidth}
               height={tooltipHeight}
-              cornerRadius={6}
-              fill="#111827"
-              opacity={0.92}
+              cornerRadius={8}
+              fill="rgba(2,6,23,0.92)"
+              stroke="rgba(34,211,238,0.26)"
+              strokeWidth={1}
+              shadowColor="rgba(2,6,23,0.45)"
+              shadowBlur={16}
+              shadowOffsetY={4}
+              shadowOpacity={1}
             />
             <Text
-              x={tooltipX + 6}
-              y={tooltipY + 5}
-              width={tooltipWidth - 12}
-              text={tooltipText}
-              fontSize={11}
-              lineHeight={1.2}
-              fill="#f8fafc"
+              x={tooltipX + tooltipPaddingX}
+              y={tooltipY + tooltipPaddingY}
+              width={tooltipInnerWidth}
+              text={tooltipTitle}
+              fontSize={tooltipTitleFontSize}
+              fontStyle="bold"
+              lineHeight={tooltipTitleLineHeight}
+              fill="#a5f3fc"
             />
+            {tooltipHasBody ? (
+              <>
+                <Line
+                  points={[
+                    tooltipX + tooltipPaddingX,
+                    tooltipY + tooltipPaddingY + tooltipTitleHeight + 3,
+                    tooltipX + tooltipWidth - tooltipPaddingX,
+                    tooltipY + tooltipPaddingY + tooltipTitleHeight + 3,
+                  ]}
+                  stroke="rgba(148,163,184,0.35)"
+                  strokeWidth={1}
+                />
+                <Text
+                  x={tooltipX + tooltipPaddingX}
+                  y={tooltipY + tooltipPaddingY + tooltipTitleHeight + tooltipDividerGap}
+                  width={tooltipInnerWidth}
+                  text={tooltipBodyText}
+                  fontSize={tooltipBodyFontSize}
+                  lineHeight={tooltipBodyLineHeight}
+                  fill="#e2e8f0"
+                />
+              </>
+            ) : null}
           </Layer>
         </Stage>
       ) : null}
