@@ -249,6 +249,7 @@ export function OrthoBuilding({
   const [hoveredSpaceId, setHoveredSpaceId] = useState<string | null>(null);
   const [hoveredAsset, setHoveredAsset] = useState<{ asset: AssetEntity; x: number; y: number } | null>(null);
   const [hoveredMarker, setHoveredMarker] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [hoveredMarkerClickable, setHoveredMarkerClickable] = useState(false);
   const [isLayerPanelOpen, setIsLayerPanelOpen] = useState(false);
   const [hoveredControlTooltip, setHoveredControlTooltip] = useState<string | null>(null);
   const layerPanelCloseTimerRef = useRef<number | null>(null);
@@ -981,7 +982,7 @@ export function OrthoBuilding({
         </div>
       ) : null}
 
-      <Stage width={stageWidth} height={stageHeight} onWheel={handleWheel}>
+      <Stage width={stageWidth} height={stageHeight} onWheel={handleWheel} style={{ cursor: (hoveredSpaceId && onSpaceClick) || hoveredMarkerClickable ? 'pointer' : 'default' }}>
         {resolvedTheme.canvasBackground ? (
           <Layer>
             <Rect
@@ -1079,9 +1080,9 @@ export function OrthoBuilding({
                 }
                 return (
                   <Group key={`fl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
-                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseEnter={(e) => { if (item.onClick) setHoveredMarkerClickable(true); if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
                     onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
-                    onMouseLeave={() => setHoveredMarker(null)}>
+                    onMouseLeave={() => { setHoveredMarker(null); setHoveredMarkerClickable(false); }}>
                     {shape === 'circle' ? (
                       <Circle x={pt.x} y={pt.y} radius={r}
                         fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
@@ -1258,9 +1259,9 @@ export function OrthoBuilding({
                   : null;
                 return (
                   <Group key={`wl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
-                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseEnter={(e) => { if (item.onClick) setHoveredMarkerClickable(true); if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
                     onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
-                    onMouseLeave={() => setHoveredMarker(null)}>
+                    onMouseLeave={() => { setHoveredMarker(null); setHoveredMarkerClickable(false); }}>
                     {shape === 'circle' ? (
                       <Circle x={pt.x} y={pt.y} radius={r}
                         fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
@@ -1507,9 +1508,9 @@ export function OrthoBuilding({
                   : null;
                 return (
                   <Group key={`ov-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
-                    onMouseEnter={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
+                    onMouseEnter={(e) => { if (item.onClick) setHoveredMarkerClickable(true); if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
                     onMouseMove={(e) => { if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}
-                    onMouseLeave={() => setHoveredMarker(null)}>
+                    onMouseLeave={() => { setHoveredMarker(null); setHoveredMarkerClickable(false); }}>
                     {shape === 'circle' ? (
                       <Circle x={pt.x} y={pt.y} radius={r}
                         fill={item.fill ?? '#0f172a'} stroke={item.stroke ?? '#38bdf8'} strokeWidth={1 / viewport.scale} />
