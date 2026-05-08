@@ -49,15 +49,6 @@ type LayerStatus =
   | { status: 'loaded'; data: LayerData }
   | { status: 'error'; error: string };
 
-function countLayerDataItems(data: LayerData) {
-  return {
-    spaces: data.spaces?.length ?? 0,
-    markers: data.markers?.length ?? 0,
-    annotations: data.annotations?.length ?? 0,
-    custom: data.custom?.length ?? 0,
-  };
-}
-
 export type OrthoBuildingProps = BuildingMapProps;
 
 let markerLabelMeasureContext: CanvasRenderingContext2D | null | undefined;
@@ -369,12 +360,6 @@ export function OrthoBuilding({
             ? await Promise.resolve(def.getData(ctx))
             : (def.data ?? {});
           if (cancelled) return;
-          console.info('[layer-debug][OrthoBuilding][layer-load] loaded', {
-            id,
-            source: def.getData ? 'getData' : 'data',
-            renderOrder: def.renderOrder ?? 'overlay',
-            counts: countLayerDataItems(data),
-          });
           setLayerStatuses((prev) => ({ ...prev, [id]: { status: 'loaded', data } }));
         } catch (err) {
           if (cancelled) return;
@@ -404,30 +389,6 @@ export function OrthoBuilding({
     }
     return { floorLayerData: floor, wallsLayerData: walls, overlayLayerData: overlay };
   }, [layerDefinitions, visibleLayers, layerStatuses]);
-
-  useEffect(() => {
-    const summarize = (bucket: LayerData[]) => bucket.reduce(
-      (acc, data) => {
-        const counts = countLayerDataItems(data);
-        return {
-          spaces: acc.spaces + counts.spaces,
-          markers: acc.markers + counts.markers,
-          annotations: acc.annotations + counts.annotations,
-          custom: acc.custom + counts.custom,
-        };
-      },
-      { spaces: 0, markers: 0, annotations: 0, custom: 0 },
-    );
-
-    console.info('[layer-debug][OrthoBuilding][bucket-counts]', {
-      floor: summarize(floorLayerData),
-      walls: summarize(wallsLayerData),
-      overlay: summarize(overlayLayerData),
-      floorLayers: floorLayerData.length,
-      wallsLayers: wallsLayerData.length,
-      overlayLayers: overlayLayerData.length,
-    });
-  }, [floorLayerData, wallsLayerData, overlayLayerData]);
 
   useEffect(() => {
     if (!isExpanded) {
@@ -1063,7 +1024,6 @@ export function OrthoBuilding({
                 )];
               }),
               ...(data.markers ?? []).map((item) => {
-                const resolved = resolveLayerPosition(item.position, model);
                 const pt = projectLayerPosition(item.position);
                 const r = (item.radius ?? 5) / viewport.scale;
                 const w = (item.width ?? (item.radius ?? 5) * 2) / viewport.scale;
@@ -1072,15 +1032,6 @@ export function OrthoBuilding({
                 const labelLayout = item.showLabel && item.label
                   ? markerLabelLayout(item, viewport.scale)
                   : null;
-                const markerIndex = (data.markers ?? []).findIndex((m) => m.id === item.id);
-                if (markerIndex >= 0 && markerIndex < 3) {
-                  console.info('[layer-debug][OrthoBuilding][walls-markers] projected marker', {
-                    layerIndex: li,
-                    markerId: item.id,
-                    resolvedPoint: resolved,
-                    projectedPoint: pt,
-                  });
-                }
                 return (
                   <Group key={`fl-mk-${li}-${item.id}`} onClick={() => item.onClick?.(item)}
                     onMouseEnter={(e) => { if (item.onClick) setHoveredMarkerClickable(true); if (item.tooltip) { const p = e.target.getStage()?.getPointerPosition(); if (p) setHoveredMarker({ text: item.tooltip, x: p.x, y: p.y }); } }}

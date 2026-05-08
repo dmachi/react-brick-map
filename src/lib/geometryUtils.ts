@@ -481,26 +481,22 @@ export function resolveLayerPosition(
   pos: LayerPosition,
   model: CanonicalBuildingMapModel,
 ): XY {
-  const toFiniteNumber = (value: unknown, field: 'x' | 'y'): number => {
+  const toFiniteNumber = (value: unknown): number => {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }
     if (typeof value === 'string') {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) {
-        console.info('[layer-debug][resolveLayerPosition] coerced string coordinate', { field, value, parsed });
         return parsed;
       }
     }
-    console.warn('[layer-debug][resolveLayerPosition] non-finite coordinate; defaulting to 0', { field, value });
     return 0;
   };
 
-  const localId = (value: string) => value.split('#').pop()?.split('/').pop() ?? value;
-
   if ('spaceId' in pos) {
-    const x = toFiniteNumber(pos.x, 'x');
-    const y = toFiniteNumber(pos.y, 'y');
+    const x = toFiniteNumber(pos.x);
+    const y = toFiniteNumber(pos.y);
     const space = model.spaces.find((s) => s.id === pos.spaceId);
     if (space) {
       const ring = getPrimaryRing(space);
@@ -523,22 +519,7 @@ export function resolveLayerPosition(
           resolved = { x: bbox.minX + x, y: bbox.minY + y };
           break;
       }
-      console.info('[layer-debug][resolveLayerPosition] space-relative resolved', {
-        spaceId: pos.spaceId,
-        originCorner,
-        input: { x: pos.x, y: pos.y },
-        resolved,
-      });
       return resolved;
-    }
-
-    const requestedLocalId = localId(pos.spaceId);
-    const localIdMatch = model.spaces.find((s) => localId(s.id) === requestedLocalId);
-    if (localIdMatch) {
-      console.info('[layer-debug][resolveLayerPosition] local-id match found but not reconciled (exact spaceId required)', {
-        requestedSpaceId: pos.spaceId,
-        matchedSpaceId: localIdMatch.id,
-      });
     }
 
     // Space not found — treat x/y as absolute fallback.
@@ -549,11 +530,7 @@ export function resolveLayerPosition(
     });
     return fallback;
   }
-  const absolute = { x: toFiniteNumber(pos.x, 'x'), y: toFiniteNumber(pos.y, 'y') };
-  console.info('[layer-debug][resolveLayerPosition] absolute resolved', {
-    input: { x: pos.x, y: pos.y },
-    resolved: absolute,
-  });
+  const absolute = { x: toFiniteNumber(pos.x), y: toFiniteNumber(pos.y) };
   return absolute;
 }
 

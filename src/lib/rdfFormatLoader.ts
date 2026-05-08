@@ -161,26 +161,7 @@ function extractBrickRecSourceFromJsonLd(
     }
   }
 
-  const TRACE_IDS = new Set([
-    'urn:demo:space:ccspace-room-1',
-    'urn:demo:space:ccspace-room-2',
-    'urn:demo:space:ccspace-room-3',
-    'urn:demo:space:ccspace-room-4',
-  ]);
-
   for (const node of graphNodes) {
-    const rawNodeId = getNodeId(node);
-    if (rawNodeId && TRACE_IDS.has(rawNodeId)) {
-      const geo = extractPolygonalGeometry(node, nodeIndex);
-      console.log('[space-trace] node found in graphNodes', {
-        id: rawNodeId,
-        isSpaceLike: isSpaceLike(node),
-        typeNames: getTypeNames(node),
-        hasGeometry: !!geo,
-        geometry: geo,
-      });
-    }
-
     if (isSpaceLike(node)) {
       const id = toCanonicalId(getNodeId(node), 'space-unknown');
       if (seenSpaces.has(id)) {
@@ -189,10 +170,6 @@ function extractBrickRecSourceFromJsonLd(
       seenSpaces.add(id);
 
       const geometry = extractPolygonalGeometry(node, nodeIndex);
-      if (TRACE_IDS.has(id)) {
-        console.log('[space-trace] pushing space', { id, hasGeometry: !!geometry, geometry });
-      }
-
       const { label, hasExplicitLabel } = getLabelWithExplicitFlag(node, nodeIndex, 'Unnamed Space');
       spaces.push({
         id,
