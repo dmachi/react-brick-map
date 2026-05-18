@@ -525,7 +525,9 @@ function markerLabelLayout(item: MarkerLayerItem, scale: number): { width: numbe
   const lineHeight = 1.15;
   const lines = fullTextWidth <= width ? 1 : 2;
   const height = fontSize * lineHeight * lines;
-  const yOffset = Math.max(shapeHalfHeight, markerIconHalfHeight(item, scale)) + 10 / scale;
+  // Place the bottom of the label 5px above the top of the icon/shape.
+  // y in JSX is computed as `pt.y - yOffset - height`, so bottom = pt.y - yOffset.
+  const yOffset = Math.max(shapeHalfHeight, markerIconHalfHeight(item, scale)) + 5 / scale;
   return { width, yOffset, fontSize, lineHeight, height };
 }
 
