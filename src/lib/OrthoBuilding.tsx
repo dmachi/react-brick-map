@@ -538,9 +538,15 @@ export function OrthoBuilding({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSpaceId, zoomToSelection]);
 
+  const minViewportScale = Math.max(minZoom, transform.scale);
+
   function updateViewport(next: { x: number; y: number; scale: number }) {
-    setViewport(next);
-    viewportChangeRef.current?.(next);
+    const constrained = {
+      ...next,
+      scale: Math.max(next.scale, minViewportScale),
+    };
+    setViewport(constrained);
+    viewportChangeRef.current?.(constrained);
   }
 
   function resetViewport() {
@@ -562,7 +568,7 @@ export function OrthoBuilding({
 
     const direction = event.evt.deltaY > 0 ? -1 : 1;
     const zoomFactor = direction > 0 ? 1.08 : 0.92;
-    const minAllowedScale = Math.min(minZoom, transform.scale * 0.25);
+    const minAllowedScale = minViewportScale;
     const maxAllowedScale = Math.max(maxZoom, transform.scale * 12);
     const nextScale = Math.min(maxAllowedScale, Math.max(minAllowedScale, viewport.scale * zoomFactor));
     const scaleRatio = nextScale / viewport.scale;
